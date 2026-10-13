@@ -118,25 +118,37 @@ pub(crate) fn label<'a>(app: &EffectcraftApp, command: &str, source: &'a str) ->
             _ => {}
         }
     }
-    match language {
-        "ja" => lookup(JAPANESE, command, source),
-        "zh-hans" => lookup(SIMPLIFIED_CHINESE, command, source),
-        "zh-hant" => lookup(TRADITIONAL_CHINESE, command, source),
-        "uk" => lookup(UKRAINIAN, command, source),
-        "es" => lookup(SPANISH, command, source),
-        "pt-br" => lookup(PORTUGUESE, command, source),
-        "ru" => lookup(RUSSIAN, command, source),
-        "fr" => lookup(FRENCH, command, source),
-        "de" => lookup(GERMAN, command, source),
-        "cs" => lookup(CZECH, command, source),
-        _ => source,
-    }
+    lookup(language, command, source).unwrap_or(source)
 }
 
-/// `source` looked up in `catalog` by (command, English label); the source itself when the pair is
+/// A command's label drawn outside the menu bar (the Timeline's and Composition panel's layer and
+/// property context menus, the dock's tab titles, the workspace bar), in the language the panels
+/// draw in: the menu bar's row for (`command`, `source`), else the panel catalog's row for
+/// `source`, else `source`. Those menus write `…` where the menu bar's sources have `...`, so
+/// either spelling finds the menu bar's row.
+pub(crate) fn command_label<'a>(command: &str, source: &'a str) -> &'a str {
+    let language = ui::current();
+    let dotted = source.strip_suffix('…').map(|stem| format!("{stem}..."));
+    lookup(language, command, source).or_else(|| lookup(language, command, dotted.as_deref()?)).unwrap_or_else(|| tr(source))
+}
+
+/// The row for (command, English label) in `language`'s menu catalog; `None` when the pair is
 /// absent, so computed labels and user names stay verbatim.
-fn lookup<'a>(catalog: &[(&str, &str, &'a str)], command: &str, source: &'a str) -> &'a str {
-    catalog.iter().find(|(id, en, _)| *id == command && *en == source).map(|(_, _, translated)| *translated).unwrap_or(source)
+fn lookup(language: &str, command: &str, source: &str) -> Option<&'static str> {
+    let catalog = match language {
+        "ja" => JAPANESE,
+        "zh-hans" => SIMPLIFIED_CHINESE,
+        "zh-hant" => TRADITIONAL_CHINESE,
+        "uk" => UKRAINIAN,
+        "es" => SPANISH,
+        "pt-br" => PORTUGUESE,
+        "ru" => RUSSIAN,
+        "fr" => FRENCH,
+        "de" => GERMAN,
+        "cs" => CZECH,
+        _ => return None,
+    };
+    catalog.iter().find(|(id, en, _)| *id == command && *en == source).map(|(_, _, translated)| *translated)
 }
 
 pub(crate) fn entry(app: &EffectcraftApp, e: &MenuEntry, shown: String) -> String {
@@ -6616,6 +6628,20 @@ mod tests {
     use effectcraft_engine::menus::{MenuNode, TREE, parse};
     use serde_json::json;
     use std::collections::BTreeSet;
+
+    /// Labels drawn outside the menu bar take the menu bar's row for their command (with `…` for
+    /// `...`), else the panel catalog's row, else stay as they are.
+    #[test]
+    fn command_label_reads_the_menu_row_then_the_panel_row() {
+        set_current("zh-hans");
+        assert_eq!(command_label("window.panel", "Project"), "项目");
+        let (command, en, translated) = SIMPLIFIED_CHINESE.iter().find(|(c, en, _)| !c.is_empty() && en.ends_with("...")).expect("a menu row ending in ...");
+        assert_eq!(command_label(command, &format!("{}…", en.trim_end_matches("..."))), *translated);
+        assert_eq!(command_label("no.such.command", "Cancel"), "取消");
+        assert_eq!(command_label("window.panel", "Comp 1"), "Comp 1");
+        set_current("en");
+        assert_eq!(command_label("window.panel", "Project"), "Project");
+    }
 
     #[test]
     fn czech_translates_menus_without_changing_bindings_or_user_names() {

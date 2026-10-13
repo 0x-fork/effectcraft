@@ -1786,7 +1786,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     // Column headers scroll with the outline and never spill into the time ruler.
     let hp = p.with_clip_rect(Rect::from_min_max(ch.min, pos2(graph_x0 - 1.0, ch.max.y)));
     let hic = |icon: Icon, x: f32| icons::paint(&hp, Rect::from_center_size(pos2(x, hy), vec2(12.0, 12.0)), icon, t.text_dim);
-    let htext = |x: f32, s: &str| hp.text(pos2(x, hy), Align2::LEFT_CENTER, s, Tokens::ui(11.0), t.text_dim);
+    let htext = |x: f32, s: &str| hp.text(pos2(x, hy), Align2::LEFT_CENTER, crate::i18n::tr(s), Tokens::ui(11.0), t.text_dim);
     if vis.av {
         hic(Icon::Eye, cw.av + 10.0);
         hic(Icon::Speaker, cw.av + 28.0);
@@ -1870,7 +1870,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
             for (id, label) in COLUMNS {
                 let label = if id == "name" { if app.ui.timeline.source_name { "Source Name" } else { "Layer Name" } } else { label };
                 let on = column_visible(&app.ui.timeline, id);
-                if ui.add_enabled(id != "name", egui::Button::new(label).selected(on)).clicked() {
+                if ui.add_enabled(id != "name", egui::Button::new(crate::i18n::tr(label)).selected(on)).clicked() {
                     actions.push(("timeline.column".into(), json!({"column": id, "visible": !on})));
                     ui.close();
                 }
@@ -3796,7 +3796,7 @@ fn prop_menu(
 ) {
     let (l, uid) = (layer.id.0, prop.uid);
     let mut item = |ui: &mut egui::Ui, key: &str, label: &str, selected: bool, cmd: &str, params: serde_json::Value| {
-        let resp = ui.add(egui::Button::new(label).selected(selected));
+        let resp = ui.add(egui::Button::new(crate::i18n::command_label(cmd, label)).selected(selected));
         auto.add(&format!("timeline.prop.{uid}.menu.{key}"), resp.rect, label);
         if resp.clicked() {
             actions.push((cmd.into(), params));
@@ -3877,7 +3877,7 @@ fn layer_context_menu(
 pub(crate) fn layer_menu(ui: &mut egui::Ui, layers: &[u64], caps: LayerMenuCaps, actions: &mut Vec<(String, serde_json::Value)>) {
     let Some(&id) = layers.first() else { return };
     let mut item = |ui: &mut egui::Ui, label: &str, cmd: &str, params: serde_json::Value| {
-        if ui.button(label).clicked() {
+        if ui.button(crate::i18n::command_label(cmd, label)).clicked() {
             actions.push(("layer.select".into(), json!({"layers": layers})));
             actions.push((cmd.into(), params));
             ui.close();
@@ -3959,10 +3959,10 @@ fn effects_submenu(ui: &mut egui::Ui, layers: &[u64], item: &mut dyn FnMut(&mut 
     widgets::menu_scroll(ui, |ui| {
         for (cat, mut fx) in cats {
             fx.sort_by_key(|e| e.name.to_ascii_lowercase());
-            ui.menu_button(cat, |ui| {
+            ui.menu_button(crate::i18n::effects::category(cat), |ui| {
                 widgets::menu_scroll(ui, |ui| {
                     for e in fx {
-                        item(ui, e.name, "effect.apply", json!({"effect": e.id, "layers": layers}));
+                        item(ui, &crate::i18n::effects::name(e.id, e.name), "effect.apply", json!({"effect": e.id, "layers": layers}));
                     }
                 });
             });
