@@ -66,16 +66,35 @@ pub(crate) fn czech(app: &EffectcraftApp) -> bool {
 
 /// Settings ▸ General ▸ Language ▸ Match System: the operating system's interface language
 /// where EffectCraft has it, else English (#229), as After Effects installs in the system's
-/// language. The browser build stays in English because it has no system-locale probe.
+/// language. The browser build follows the locales its page passes in ([`set_system_locales`]).
 fn system_language() -> &'static str {
     #[cfg(not(target_arch = "wasm32"))]
     {
         static LANGUAGE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
         LANGUAGE.get_or_init(|| supported(sys_locale::get_locale().as_deref()))
     }
-    // No system locale in the browser build: English.
     #[cfg(target_arch = "wasm32")]
-    supported(None)
+    first_supported(SYSTEM_LOCALES.get().map(Vec::as_slice).unwrap_or_default())
+}
+
+/// The browser's preferred languages, most preferred first (`?lang=` in the address, then
+/// `navigator.languages`), for Match System in the web build.
+static SYSTEM_LOCALES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// Tell Match System the system's preferred languages (the web build has no locale probe of its
+/// own). Set before the first frame; only the first call counts.
+pub fn set_system_locales(tags: Vec<String>) {
+    let _ = SYSTEM_LOCALES.set(tags);
+}
+
+/// The first of `tags` EffectCraft has a catalog for (English counts), else English: someone who
+/// prefers Dutch, then Czech, gets Czech.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn first_supported(tags: &[String]) -> &'static str {
+    tags.iter()
+        .map(|t| (t, supported(Some(t))))
+        .find(|(t, code)| *code != "en" || t.split(['-', '_']).next().is_some_and(|p| p.eq_ignore_ascii_case("en")))
+        .map_or("en", |(_, code)| code)
 }
 
 /// The language EffectCraft shows for a BCP 47 locale (`ja-JP` → `ja`, `zh-Hans-CN` → `zh-hans`,
@@ -6641,6 +6660,16 @@ mod tests {
         assert_eq!(command_label("window.panel", "Comp 1"), "Comp 1");
         set_current("en");
         assert_eq!(command_label("window.panel", "Project"), "Project");
+    }
+
+    #[test]
+    fn match_system_takes_the_first_browser_language_with_a_catalog() {
+        let tags = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(super::first_supported(&tags(&["cs-CZ", "cs", "en"])), "cs");
+        assert_eq!(super::first_supported(&tags(&["nl-NL", "cs"])), "cs");
+        assert_eq!(super::first_supported(&tags(&["en-US", "cs"])), "en");
+        assert_eq!(super::first_supported(&tags(&["nl-NL"])), "en");
+        assert_eq!(super::first_supported(&tags(&[])), "en");
     }
 
     #[test]
