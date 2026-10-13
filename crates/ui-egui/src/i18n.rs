@@ -13,7 +13,7 @@ use effectcraft_engine::menus::{MenuEntry, MenuNode};
 pub(crate) use ui::{set_current, tr, tr_args};
 
 /// Every language with a catalog, in the order Settings ▸ General ▸ Language lists them.
-const CATALOG_CODES: [&str; 10] = ["ja", "zh-hans", "zh-hant", "uk", "es", "pt-br", "ru", "fr", "de", "cs"];
+const CATALOG_CODES: [&str; 11] = ["ja", "zh-hans", "zh-hant", "uk", "es", "pt-br", "ru", "fr", "de", "cs", "ka"];
 
 /// The active interface language: the stored preference when it names a catalog, otherwise `en`
 /// (English is the source of every label and needs no lookup).
@@ -64,6 +64,11 @@ pub(crate) fn czech(app: &EffectcraftApp) -> bool {
     language(app) == "cs"
 }
 
+/// The UI is in Georgian.
+pub(crate) fn georgian(app: &EffectcraftApp) -> bool {
+    language(app) == "ka"
+}
+
 /// Settings ▸ General ▸ Language ▸ Match System: the operating system's interface language
 /// where EffectCraft has it, else English (#229), as After Effects installs in the system's
 /// language. The browser build follows the locales its page passes in ([`set_system_locales`]).
@@ -98,7 +103,8 @@ fn first_supported(tags: &[String]) -> &'static str {
 }
 
 /// The language EffectCraft shows for a BCP 47 locale (`ja-JP` → `ja`, `zh-Hans-CN` → `zh-hans`,
-/// `zh-TW` → `zh-hant`, `uk-UA` → `uk`, `es-ES` → `es`, `pt-BR` → `pt-br`, `cs-CZ` → `cs`).
+/// `zh-TW` → `zh-hant`, `uk-UA` → `uk`, `es-ES` → `es`, `pt-BR` → `pt-br`, `cs-CZ` → `cs`,
+/// `ka-GE` → `ka`).
 fn supported(locale: Option<&str>) -> &'static str {
     let Some(locale) = locale else { return "en" };
     let mut parts = locale.split(['-', '_']);
@@ -109,6 +115,7 @@ fn supported(locale: Option<&str>) -> &'static str {
         "uk" => "uk",
         "es" => "es",
         "cs" => "cs",
+        "ka" => "ka",
         // The only Portuguese catalog: Brazil's, also for Portugal rather than English.
         "pt" => "pt-br",
         "zh" => {
@@ -134,6 +141,13 @@ pub(crate) fn label<'a>(app: &EffectcraftApp, command: &str, source: &'a str) ->
         match source {
             "Reveal in Explorer" => return "Zobrazit v Průzkumníku",
             "Reveal in File Manager" => return "Zobrazit ve správci souborů",
+            _ => {}
+        }
+    }
+    if language == "ka" && matches!(command, "file.revealInFinder" | "layer.revealInFinder") {
+        match source {
+            "Reveal in Explorer" => return "Explorer-ში ჩვენება",
+            "Reveal in File Manager" => return "ფაილების მენეჯერში ჩვენება",
             _ => {}
         }
     }
@@ -165,6 +179,7 @@ fn lookup(language: &str, command: &str, source: &str) -> Option<&'static str> {
         "fr" => FRENCH,
         "de" => GERMAN,
         "cs" => CZECH,
+        "ka" => GEORGIAN,
         _ => return None,
     };
     catalog.iter().find(|(id, en, _)| *id == command && *en == source).map(|(_, _, translated)| *translated)
@@ -190,6 +205,8 @@ pub(crate) fn entry(app: &EffectcraftApp, e: &MenuEntry, shown: String) -> Strin
         "es" => ("Deshacer", "No se puede deshacer", "Rehacer", "No se puede rehacer"),
         "pt-br" => ("Desfazer", "Não há nada para desfazer", "Refazer", "Não há nada para refazer"),
         "cs" => ("Zpět", "Není co vrátit", "Znovu", "Není co zopakovat"),
+        // A colon before the history's (untranslated) action name: "დაბრუნება: Comp1".
+        "ka" => ("დაბრუნება:", "დაბრუნება შეუძლებელია", "ხელახლა შესრულება:", "ხელახლა შესრულება შეუძლებელია"),
         _ => return shown,
     };
     match e.command.as_str() {
@@ -297,6 +314,17 @@ pub(crate) fn submenu(app: &EffectcraftApp, source: &str, shown: String) -> Stri
                 && let Some(name) = shown.strip_prefix("Assign Shortcut to “").and_then(|s| s.strip_suffix('”'))
             {
                 return format!("Atribuir atalho à visualização 3D “{name}”");
+            }
+        }
+        "ka" => {
+            if source == "Assign Shortcut to Workspace" {
+                if let Some(name) = shown.strip_prefix("Assign Shortcut to “").and_then(|s| s.strip_suffix("” Workspace")) {
+                    return format!("მალსახმობის მინიჭება სამუშაო სივრცისთვის „{name}“");
+                }
+            } else if source == "Assign Shortcut to 3D View"
+                && let Some(name) = shown.strip_prefix("Assign Shortcut to “").and_then(|s| s.strip_suffix('”'))
+            {
+                return format!("მალსახმობის მინიჭება 3D ხედისთვის „{name}“");
             }
         }
         _ => {}
@@ -6641,6 +6669,641 @@ const CZECH: &[(&str, &str, &str)] = &[
     ("file.openDemoProject", "Open Demo Project", "Otevřít ukázkový projekt"),
 ];
 
+/// Georgian (ka): the same (command, English label) keys as `JAPANESE`, one entry per fixed menu row.
+/// Original translations written from the meaning of the English labels, sharing the terminology of
+/// the other Craft apps' Georgian catalogs (შრე, საკვანძო კადრი, კომპოზიცია, ნიღაბი); commands are
+/// verbal nouns (შენახვა, გახსნა) and Georgian has no capital letters.
+const GEORGIAN: &[(&str, &str, &str)] = &[
+    ("", "EffectCraft", "EffectCraft"),
+    ("app.about", "About EffectCraft...", "EffectCraft-ის შესახებ..."),
+    ("", "Settings...", "პარამეტრები..."),
+    ("app.settings", "General...", "ზოგადი..."),
+    ("app.settings", "Startup & Repair...", "გაშვება და აღდგენა..."),
+    ("app.settings", "Project...", "პროექტი..."),
+    ("app.settings", "Composition...", "კომპოზიცია..."),
+    ("app.settings", "Previews...", "წინასწარი ნახვა..."),
+    ("app.settings", "Appearance...", "იერსახე..."),
+    ("app.settings", "Grids & Guides...", "ბადე და დამხმარე ხაზები..."),
+    ("app.settings", "Labels...", "იარლიყები..."),
+    ("app.settings", "Type...", "ტექსტი..."),
+    ("app.settings", "Import...", "იმპორტი..."),
+    ("app.settings", "Export...", "ექსპორტი..."),
+    ("app.settings", "Audio...", "აუდიო..."),
+    ("app.settings", "Disk...", "დისკი..."),
+    ("app.settings", "Memory & CPU...", "მეხსიერება და CPU..."),
+    ("app.settings", "Video...", "ვიდეო..."),
+    ("app.settings", "3D...", "3D..."),
+    ("app.settings", "Scripting & Expressions...", "სკრიპტები და ექსპრესიები..."),
+    ("app.hide", "Hide EffectCraft", "EffectCraft-ის დამალვა"),
+    ("app.hideOthers", "Hide Others", "სხვების დამალვა"),
+    ("app.showAll", "Show All", "ყველას ჩვენება"),
+    ("app.quit", "Quit EffectCraft", "EffectCraft-იდან გასვლა"),
+    ("", "File", "ფაილი"),
+    ("", "New", "ახალი"),
+    ("file.newProject", "New Project", "ახალი პროექტი"),
+    ("file.newFromTemplate", "New Project from Template...", "ახალი პროექტი შაბლონიდან..."),
+    ("project.newFolder", "New Folder", "ახალი საქაღალდე"),
+    ("file.open", "Open Project...", "პროექტის გახსნა..."),
+    ("", "Open Recent", "ბოლოს გახსნილი ფაილების გახსნა"),
+    ("file.clearRecent", "Clear Recent Projects", "ბოლო პროექტების სიის გასუფთავება"),
+    ("file.close", "Close", "დახურვა"),
+    ("file.closeProject", "Close Project", "პროექტის დახურვა"),
+    ("file.save", "Save", "შენახვა"),
+    ("", "Save As", "შენახვა როგორც"),
+    ("file.saveAs", "Save As...", "შენახვა როგორც..."),
+    ("file.saveCopy", "Save a Copy...", "ასლის შენახვა..."),
+    ("file.saveCopyAsXml", "Save a Copy As XML...", "ასლის შენახვა XML-ად..."),
+    ("templates.saveAs", "Save as Template...", "შაბლონად შენახვა..."),
+    ("file.incrementAndSave", "Increment and Save", "ვერსიის გაზრდით შენახვა"),
+    ("file.revert", "Revert", "წინა ვერსიაზე დაბრუნება"),
+    ("", "Import", "იმპორტი"),
+    ("file.import", "File...", "ფაილი..."),
+    ("file.importMultiple", "Multiple Files...", "რამდენიმე ფაილი..."),
+    ("file.importTimeline", "Adobe Premiere Pro Project...", "Adobe Premiere Pro-ს პროექტი..."),
+    ("file.importProject", "EffectCraft Project...", "EffectCraft-ის პროექტი..."),
+    ("file.importPlaceholder", "Placeholder...", "ჩანაცვლების ობიექტი..."),
+    ("file.importSolid", "Solid...", "სოლიდი..."),
+    ("file.importLottie", "Lottie...", "Lottie..."),
+    ("file.importVanishingPoint", "Vanishing Point (.vpe)...", "Vanishing Point (.vpe)..."),
+    ("essential.importTemplate", "Essential Graphics Template...", "ძირითადი გრაფიკის შაბლონი..."),
+    ("", "Import Recent Footage", "ბოლო ვიდეომასალის იმპორტი"),
+    ("file.clearRecentFootage", "Clear Recent Footage", "ბოლო ვიდეომასალის სიის გასუფთავება"),
+    ("", "Export", "ექსპორტი"),
+    ("renderQueue.add", "Add to Render Queue", "რენდერის რიგში დამატება"),
+    ("file.exportTimeline", "Adobe Premiere Pro Project...", "Adobe Premiere Pro-ს პროექტი..."),
+    ("file.exportLottie", "Lottie JSON...", "Lottie JSON..."),
+    ("essential.exportTemplate", "Essential Graphics Template...", "ძირითადი გრაფიკის შაბლონი..."),
+    ("app.find", "Find", "ძებნა"),
+    ("layer.addItem", "Add Footage to Comp", "ვიდეომასალის კომპოზიციაში დამატება"),
+    ("file.newCompFromSelection", "New Comp from Selection...", "ახალი კომპოზიცია მონიშნულიდან..."),
+    ("", "Dependencies", "დამოკიდებულებები"),
+    ("file.collectFiles", "Collect Files...", "ფაილების შეგროვება..."),
+    ("file.consolidateFootage", "Consolidate All Footage", "მთელი ვიდეომასალის კონსოლიდაცია"),
+    ("file.removeUnusedFootage", "Remove Unused Footage", "გამოუყენებელი ვიდეომასალის წაშლა"),
+    ("file.reduceProject", "Reduce Project", "პროექტის შემცირება"),
+    ("file.findMissing", "Find Missing Effects", "დაკარგული ეფექტების ძებნა"),
+    ("file.findMissing", "Find Missing Fonts", "დაკარგული შრიფტების ძებნა"),
+    ("file.findMissing", "Find Missing Footage", "დაკარგული ვიდეომასალის ძებნა"),
+    ("file.relinkFootage", "Relink Missing Footage...", "დაკარგული ვიდეომასალის ხელახლა დაკავშირება..."),
+    ("file.watchFolder", "Watch Folder...", "საქაღალდეზე თვალყურის დევნება..."),
+    ("", "Scripts", "სკრიპტები"),
+    ("file.installScript", "Install Script File...", "სკრიპტის ფაილის დაყენება..."),
+    ("file.installScriptUIPanel", "Install ScriptUI Panel...", "ScriptUI პანელის დაყენება..."),
+    ("file.runScript", "Run Script File...", "სკრიპტის ფაილის გაშვება..."),
+    ("", "Create Proxy", "პროქსის შექმნა"),
+    ("file.createProxy", "Still...", "სტატიკური კადრი..."),
+    ("file.createProxy", "Movie...", "ვიდეო..."),
+    ("", "Set Proxy", "პროქსის მინიჭება"),
+    ("file.setProxy", "File...", "ფაილი..."),
+    ("file.setProxyNone", "None", "არცერთი"),
+    ("", "Interpret Footage", "ვიდეომასალის ინტერპრეტაცია"),
+    ("file.interpretFootage", "Main...", "ძირითადი..."),
+    ("file.interpretProxy", "Proxy...", "პროქსი..."),
+    ("file.rememberInterpretation", "Remember Interpretation", "ინტერპრეტაციის დამახსოვრება"),
+    ("file.applyInterpretation", "Apply Interpretation", "ინტერპრეტაციის გამოყენება"),
+    ("", "Replace Footage", "ვიდეომასალის ჩანაცვლება"),
+    ("file.replaceFootage", "File...", "ფაილი..."),
+    ("file.replaceWithPlaceholder", "Placeholder...", "ჩანაცვლების ობიექტი..."),
+    ("file.replaceWithSolid", "Solid...", "სოლიდი..."),
+    ("file.replaceWithLayeredComp", "With Layered Comp", "შრეებიანი კომპოზიციით"),
+    ("file.reloadFootage", "Reload Footage", "ვიდეომასალის ხელახლა ჩატვირთვა"),
+    ("file.revealInFinder", "Reveal in Finder", "Finder-ში ჩვენება"),
+    ("file.projectSettings", "Project Settings...", "პროექტის პარამეტრები..."),
+    ("app.quit", "Exit", "გასვლა"),
+    ("", "Edit", "რედაქტირება"),
+    ("edit.undo", "Undo", "დაბრუნება"),
+    ("edit.redo", "Redo", "ხელახლა შესრულება"),
+    ("", "History", "ისტორია"),
+    ("app.commandPalette", "Quick Apply...", "სწრაფი გამოყენება..."),
+    ("edit.cut", "Cut", "ამოჭრა"),
+    ("edit.copy", "Copy", "კოპირება"),
+    ("edit.copyWithPropertyLinks", "Copy with Property Links", "კოპირება თვისებების ბმულებით"),
+    ("edit.copyWithRelativePropertyLinks", "Copy with Relative Property Links", "კოპირება თვისებების ფარდობითი ბმულებით"),
+    ("edit.copyExpressionOnly", "Copy Expression Only", "მხოლოდ ექსპრესიის კოპირება"),
+    ("edit.paste", "Paste", "ჩასმა"),
+    ("edit.pasteReversedKeyframes", "Paste Reversed Keyframes", "საკვანძო კადრების შებრუნებული ჩასმა"),
+    ("edit.pasteTextMatchFormatting", "Paste Text and Match Formatting", "ტექსტის ჩასმა ფორმატის შეთანხმებით"),
+    ("edit.pasteTextFormattingOnly", "Paste Text Formatting Only", "მხოლოდ ტექსტის ფორმატის ჩასმა"),
+    ("edit.clear", "Clear", "გასუფთავება"),
+    ("edit.duplicate", "Duplicate", "დუბლირება"),
+    ("edit.splitLayer", "Split Layer", "შრის დაყოფა"),
+    ("edit.liftWorkArea", "Lift Work Area", "სამუშაო არის აწევა"),
+    ("edit.extractWorkArea", "Extract Work Area", "სამუშაო არის ამოღება"),
+    ("edit.selectAll", "Select All", "ყველაფრის მონიშვნა"),
+    ("edit.deselectAll", "Deselect All", "ყველა მონიშვნის მოხსნა"),
+    ("", "Label", "იარლიყი"),
+    ("edit.selectLabelGroup", "Select Label Group", "იარლიყის ჯგუფის მონიშვნა"),
+    ("edit.label", "None", "არცერთი"),
+    ("edit.label", "Red", "წითელი"),
+    ("edit.label", "Yellow", "ყვითელი"),
+    ("edit.label", "Aqua", "ზღვისფერი"),
+    ("edit.label", "Pink", "ვარდისფერი"),
+    ("edit.label", "Lavender", "ლავანდისფერი"),
+    ("edit.label", "Peach", "ატმისფერი"),
+    ("edit.label", "Sea Foam", "ზღვის ქაფი"),
+    ("edit.label", "Blue", "ლურჯი"),
+    ("edit.label", "Green", "მწვანე"),
+    ("edit.label", "Purple", "იისფერი"),
+    ("edit.label", "Orange", "ნარინჯისფერი"),
+    ("edit.label", "Brown", "ყავისფერი"),
+    ("edit.label", "Fuchsia", "ფუქსია"),
+    ("edit.label", "Cyan", "ცისფერი"),
+    ("edit.label", "Sandstone", "ქვიშაქვა"),
+    ("edit.label", "Dark Green", "მუქი მწვანე"),
+    ("app.settings", "Edit Label Colors...", "იარლიყის ფერების რედაქტირება..."),
+    ("", "Select Keyframe Label Group", "საკვანძო კადრების იარლიყის ჯგუფის მონიშვნა"),
+    ("keys.selectLabelGroup", "On Selected Layers", "მონიშნულ შრეებზე"),
+    ("keys.selectLabelGroup", "On All Layers", "ყველა შრეზე"),
+    ("keys.selectLabelGroup", "Visible Keyframes on Selected Layers", "ხილული საკვანძო კადრები მონიშნულ შრეებზე"),
+    ("keys.selectLabelGroup", "Visible Keyframes on All Layers", "ხილული საკვანძო კადრები ყველა შრეზე"),
+    ("", "Purge", "გაწმენდა"),
+    ("edit.purge", "All Cache...", "მთელი ქეში..."),
+    ("edit.purge", "All Memory & Disk Cache...", "მთელი მეხსიერება და დისკის ქეში..."),
+    ("edit.purge", "All Memory", "მთელი მეხსიერება"),
+    ("edit.purge", "All Disk Cache...", "მთელი დისკის ქეში..."),
+    ("edit.purge", "All 3D Cache...", "მთელი 3D ქეში..."),
+    ("edit.purgeUndo", "Undo", "დაბრუნების ისტორია"),
+    ("edit.purge", "Image Cache Memory", "გამოსახულების ქეშის მეხსიერება"),
+    ("edit.purge", "Snapshot", "მომენტალური ასლი"),
+    ("edit.editOriginal", "Edit Original...", "ორიგინალის რედაქტირება..."),
+    ("", "Templates", "შაბლონები"),
+    ("app.templates", "Render Settings...", "რენდერის პარამეტრები..."),
+    ("app.templates", "Output Module...", "გამოტანის მოდული..."),
+    ("app.keyboardShortcuts", "Keyboard Shortcuts", "კლავიატურის მალსახმობები"),
+    ("", "Preferences", "პარამეტრები"),
+    ("", "Composition", "კომპოზიცია"),
+    ("comp.new", "New Composition...", "ახალი კომპოზიცია..."),
+    ("comp.settings", "Composition Settings...", "კომპოზიციის პარამეტრები..."),
+    ("comp.setPosterTime", "Set Poster Time", "პოსტერის დროის დაყენება"),
+    ("comp.trimToWorkArea", "Trim Comp to Work Area", "კომპოზიციის მოკვეთა სამუშაო არემდე"),
+    ("comp.cropToRegionOfInterest", "Crop Comp to Region of Interest", "კომპოზიციის ჩამოჭრა ინტერესის არემდე"),
+    ("comp.cropToLayerBounds", "Crop Comp to Selected Layer(s) Bounds", "კომპოზიციის ჩამოჭრა მონიშნული შრ(ეებ)ის საზღვრებამდე"),
+    ("render.addOutputModule", "Add Output Module", "გამოტანის მოდულის დამატება"),
+    ("", "Preview", "წინასწარი ნახვა"),
+    ("playback.toggle", "Play Current Preview", "მიმდინარე წინასწარი ნახვის დაკვრა"),
+    ("playback.cacheWhenIdle", "Cache Frames When Idle", "კადრების ქეშირება უქმობისას"),
+    ("playback.audio", "Audio", "აუდიო"),
+    ("", "Save Frame As", "კადრის შენახვა როგორც"),
+    ("comp.saveFrameAs", "File...", "ფაილი..."),
+    ("comp.saveFrameAsPsd", "Photoshop Layers...", "Photoshop-ის შრეები..."),
+    ("comp.saveFrameAsExr", "ProEXR...", "ProEXR..."),
+    ("comp.copyFrame", "Copy Frame to Clipboard", "კადრის კოპირება გაცვლის ბუფერში"),
+    ("render.preRender", "Pre-render...", "წინასწარი რენდერი..."),
+    ("render.saveCurrentPreview", "Save Current Preview...", "მიმდინარე წინასწარი ნახვის შენახვა..."),
+    ("comp.openInEssentialGraphics", "Open in Essential Graphics", "ძირითად გრაფიკაში გახსნა"),
+    ("", "Responsive Design — Time", "რესპონსიული დიზაინი — დრო"),
+    ("comp.responsiveTime", "Create Intro", "შესავლის შექმნა"),
+    ("comp.responsiveTime", "Create Outro", "დასასრულის შექმნა"),
+    ("comp.responsiveTime", "Create Protected Region from Work Area", "დაცული არის შექმნა სამუშაო არიდან"),
+    ("comp.flowchart", "Composition Flowchart", "კომპოზიციის ბლოკ-სქემა"),
+    ("comp.miniFlowchart", "Composition Mini-Flowchart", "კომპოზიციის მინი-ბლოკ-სქემა"),
+    ("", "VR", "VR"),
+    ("comp.vr.createEnvironment", "Create VR Environment...", "VR გარემოს შექმნა..."),
+    ("comp.vr.extractCubemap", "Extract Cubemap...", "კუბური რუკის ამოღება..."),
+    ("", "Layer", "შრე"),
+    ("layer.newText", "Text", "ტექსტი"),
+    ("layer.newSolid", "Solid...", "სოლიდი..."),
+    ("layer.newLight", "Light...", "სინათლე..."),
+    ("layer.newCamera", "Camera...", "კამერა..."),
+    ("layer.newNull", "Null Object", "ნულოვანი ობიექტი"),
+    ("layer.newShape", "Shape Layer", "ფიგურის შრე"),
+    ("layer.newAdjustment", "Adjustment Layer", "კორექციის შრე"),
+    ("layer.newContentAwareFill", "Content-Aware Fill Layer...", "შიგთავსის გათვალისწინებით შევსების შრე..."),
+    ("layer.new3dPrimitive", "Cube", "კუბი"),
+    ("layer.new3dPrimitive", "Sphere", "სფერო"),
+    ("layer.new3dPrimitive", "Plane", "სიბრტყე"),
+    ("layer.new3dPrimitive", "Torus", "ტორი"),
+    ("layer.new3dPrimitive", "Cone", "კონუსი"),
+    ("layer.new3dPrimitive", "Cylinder", "ცილინდრი"),
+    ("layer.settings", "Layer Settings...", "შრის პარამეტრები..."),
+    ("layer.openLayer", "Open Layer", "შრის გახსნა"),
+    ("layer.openSource", "Open Layer Source", "შრის წყაროს გახსნა"),
+    ("layer.revealInFinder", "Reveal in Finder", "Finder-ში ჩვენება"),
+    ("", "Mask", "ნიღაბი"),
+    ("layer.addMask", "New Mask", "ახალი ნიღაბი"),
+    ("layer.mask.shape", "Mask Shape...", "ნიღბის ფორმა..."),
+    ("layer.mask.set", "Mask Feather...", "ნიღბის კიდეების შერბილება..."),
+    ("layer.mask.set", "Mask Opacity...", "ნიღბის გაუმჭვირვალობა..."),
+    ("layer.mask.set", "Mask Expansion...", "ნიღბის გაფართოება..."),
+    ("layer.mask.reset", "Reset Mask", "ნიღბის ჩამოყრა"),
+    ("layer.mask.remove", "Remove Mask", "ნიღბის წაშლა"),
+    ("layer.mask.removeAll", "Remove All Masks", "ყველა ნიღბის წაშლა"),
+    ("track.mask", "Track Mask", "ნიღბის ტრეკინგი"),
+    ("", "Mode", "რეჟიმი"),
+    ("layer.mask.mode", "None", "არცერთი"),
+    ("layer.mask.mode", "Add", "დამატება"),
+    ("layer.mask.mode", "Subtract", "გამოკლება"),
+    ("layer.mask.mode", "Intersect", "გადაკვეთა"),
+    ("layer.mask.mode", "Lighten", "გაღიავება"),
+    ("layer.mask.mode", "Darken", "ჩამუქება"),
+    ("layer.mask.mode", "Difference", "სხვაობა"),
+    ("layer.mask.invert", "Inverted", "შებრუნებული"),
+    ("layer.mask.lock", "Locked", "ჩაკეტილი"),
+    ("", "Motion Blur", "მოძრაობის გაბუნდოვნება"),
+    ("layer.mask.motionBlur", "Same As Layer", "შრის მსგავსად"),
+    ("layer.mask.motionBlur", "On", "ჩართული"),
+    ("layer.mask.motionBlur", "Off", "გამორთული"),
+    ("", "Feather Falloff", "კიდეების შერბილების მილევა"),
+    ("layer.mask.featherFalloff", "Smooth", "გლუვი"),
+    ("layer.mask.featherFalloff", "Linear", "წრფივი"),
+    ("layer.mask.unlockAll", "Unlock All Masks", "ყველა ნიღბის განბლოკვა"),
+    ("layer.mask.lockOthers", "Lock Other Masks", "სხვა ნიღბების ჩაკეტვა"),
+    ("layer.mask.hideLocked", "Hide Locked Masks", "ჩაკეტილი ნიღბების დამალვა"),
+    ("", "Mask and Shape Path", "ნიღაბი და ფიგურის ტრაექტორია"),
+    ("path.rotoBezier", "RotoBezier", "RotoBezier"),
+    ("mask.setClosed", "Closed", "შეკრული"),
+    ("path.convertToBezier", "Convert To Bezier Path", "ბეზიეს ტრაექტორიად გარდაქმნა"),
+    ("path.setFirstVertex", "Set First Vertex", "პირველი წვეროს დაყენება"),
+    ("path.freeTransform", "Free Transform Points", "წერტილების თავისუფალი გარდაქმნა"),
+    ("", "Quality", "ხარისხი"),
+    ("layer.quality", "Best", "საუკეთესო"),
+    ("layer.quality", "Draft", "მონახაზი"),
+    ("layer.quality", "Wireframe", "კარკასი"),
+    ("layer.sampling", "Bilinear", "ბიწრფივი"),
+    ("layer.sampling", "Bicubic", "ბიკუბური"),
+    ("", "Switches", "გადამრთველები"),
+    ("layer.hideOtherVideo", "Hide Other Video", "სხვა ვიდეოს დამალვა"),
+    ("layer.showAllVideo", "Show All Video", "მთელი ვიდეოს ჩვენება"),
+    ("layer.unlockAll", "Unlock All Layers", "ყველა შრის განბლოკვა"),
+    ("layer.expressions", "Enable Expressions", "ექსპრესიების ჩართვა"),
+    ("layer.expressions", "Disable Expressions", "ექსპრესიების გამორთვა"),
+    ("layer.setSwitch", "Shy", "მორცხვი"),
+    ("layer.setSwitch", "Lock", "ჩაკეტვა"),
+    ("layer.setSwitch", "Audio", "აუდიო"),
+    ("layer.setSwitch", "Video", "ვიდეო"),
+    ("layer.setSwitch", "Solo", "სოლო"),
+    ("layer.setSwitch", "Effect", "ეფექტი"),
+    ("layer.setSwitch", "Collapse", "ჩაკეცვა"),
+    ("layer.setSwitch", "Motion Blur", "მოძრაობის გაბუნდოვნება"),
+    ("layer.setSwitch", "Adjustment Layer", "კორექციის შრე"),
+    ("", "Transform", "გარდაქმნა"),
+    ("layer.transform", "Reset", "ჩამოყრა"),
+    ("layer.setTransform", "Anchor Point...", "საყრდენი წერტილი..."),
+    ("layer.setTransform", "Position...", "პოზიცია..."),
+    ("layer.setTransform", "Scale...", "მასშტაბი..."),
+    ("layer.setTransform", "Orientation...", "ორიენტაცია..."),
+    ("layer.setTransform", "Rotation...", "შემობრუნება..."),
+    ("layer.setTransform", "Opacity...", "გაუმჭვირვალობა..."),
+    ("layer.transform", "Flip Horizontal", "ჰორიზონტალურად არეკვლა"),
+    ("layer.transform", "Flip Vertical", "ვერტიკალურად არეკვლა"),
+    ("layer.transform", "Center In View", "ხედის ცენტრში მოთავსება"),
+    ("layer.centerAnchor", "Center Anchor Point in Layer Content", "საყრდენი წერტილის შრის შიგთავსის ცენტრში მოთავსება"),
+    ("layer.transform", "Fit to Comp", "კომპოზიციაში ჩატევა"),
+    ("layer.transform", "Fit to Comp Width", "კომპოზიციის სიგანეში ჩატევა"),
+    ("layer.transform", "Fit to Comp Height", "კომპოზიციის სიმაღლეში ჩატევა"),
+    ("layer.autoOrient", "Auto-Orient...", "ავტოორიენტაცია..."),
+    ("", "Time", "დრო"),
+    ("layer.enableTimeRemap", "Enable Time Remapping", "დროის გადანაწილების ჩართვა"),
+    ("layer.timeReverse", "Time-Reverse Layer", "შრის დროში შებრუნება"),
+    ("layer.timeStretch", "Time Stretch...", "დროში გაწელვა..."),
+    ("layer.freezeFrame", "Freeze Frame", "კადრის გაყინვა"),
+    ("layer.freezeOnLastFrame", "Freeze On Last Frame", "ბოლო კადრზე გაყინვა"),
+    ("layer.alignVideoToData", "Align Video to Data", "ვიდეოს მონაცემებთან სწორება"),
+    ("", "Frame Blending", "კადრების შერევა"),
+    ("layer.frameBlending", "Off", "გამორთული"),
+    ("layer.frameBlending", "Frame Mix", "კადრების ნაზავი"),
+    ("layer.frameBlending", "Pixel Motion", "პიქსელების მოძრაობა"),
+    ("layer.setSwitch", "3D Layer", "3D შრე"),
+    ("layer.setSwitch", "Guide Layer", "დამხმარე შრე"),
+    ("layer.environment", "Environment Layer", "გარემოს შრე"),
+    ("", "Markers", "მარკერები"),
+    ("layer.addMarker", "Add Marker", "მარკერის დამატება"),
+    ("layer.updateMarkersFromSource", "Update Markers From Source", "მარკერების განახლება წყაროდან"),
+    ("layer.markersLock", "Lock Markers", "მარკერების ჩაკეტვა"),
+    ("layer.deleteAllMarkers", "Delete All Markers", "ყველა მარკერის წაშლა"),
+    ("layer.setSwitch", "Preserve Transparency", "გამჭვირვალობის შენარჩუნება"),
+    ("", "Blending Mode", "შერევის რეჟიმი"),
+    ("layer.setBlendMode", "Normal", "ჩვეულებრივი"),
+    ("layer.setBlendMode", "Dissolve", "გაფანტვა"),
+    ("layer.setBlendMode", "Dancing Dissolve", "მოცეკვავე გაფანტვა"),
+    ("layer.setBlendMode", "Darken", "ჩამუქება"),
+    ("layer.setBlendMode", "Multiply", "გამრავლება"),
+    ("layer.setBlendMode", "Color Burn", "ფერით ჩამუქება"),
+    ("layer.setBlendMode", "Classic Color Burn", "კლასიკური ფერით ჩამუქება"),
+    ("layer.setBlendMode", "Linear Burn", "წრფივი ჩამუქება"),
+    ("layer.setBlendMode", "Darker Color", "უფრო მუქი ფერი"),
+    ("layer.setBlendMode", "Add", "დამატება"),
+    ("layer.setBlendMode", "Lighten", "გაღიავება"),
+    ("layer.setBlendMode", "Screen", "ეკრანი"),
+    ("layer.setBlendMode", "Color Dodge", "ფერით გაღიავება"),
+    ("layer.setBlendMode", "Classic Color Dodge", "კლასიკური ფერით გაღიავება"),
+    ("layer.setBlendMode", "Linear Dodge", "წრფივი გაღიავება"),
+    ("layer.setBlendMode", "Lighter Color", "უფრო ღია ფერი"),
+    ("layer.setBlendMode", "Overlay", "გადაფარვა"),
+    ("layer.setBlendMode", "Soft Light", "რბილი სინათლე"),
+    ("layer.setBlendMode", "Hard Light", "მკვეთრი სინათლე"),
+    ("layer.setBlendMode", "Linear Light", "წრფივი სინათლე"),
+    ("layer.setBlendMode", "Vivid Light", "კაშკაშა სინათლე"),
+    ("layer.setBlendMode", "Pin Light", "წერტილოვანი სინათლე"),
+    ("layer.setBlendMode", "Hard Mix", "მკვეთრი შერევა"),
+    ("layer.setBlendMode", "Difference", "სხვაობა"),
+    ("layer.setBlendMode", "Classic Difference", "კლასიკური სხვაობა"),
+    ("layer.setBlendMode", "Exclusion", "გამორიცხვა"),
+    ("layer.setBlendMode", "Subtract", "გამოკლება"),
+    ("layer.setBlendMode", "Divide", "გაყოფა"),
+    ("layer.setBlendMode", "Hue", "ფერის ტონი"),
+    ("layer.setBlendMode", "Saturation", "გაჯერება"),
+    ("layer.setBlendMode", "Color", "ფერი"),
+    ("layer.setBlendMode", "Luminosity", "ნათება"),
+    ("layer.setBlendMode", "Stencil Alpha", "ალფა-ტრაფარეტი"),
+    ("layer.setBlendMode", "Stencil Luma", "ლუმა-ტრაფარეტი"),
+    ("layer.setBlendMode", "Silhouette Alpha", "ალფა-სილუეტი"),
+    ("layer.setBlendMode", "Silhouette Luma", "ლუმა-სილუეტი"),
+    ("layer.setBlendMode", "Alpha Add", "ალფას დამატება"),
+    ("layer.setBlendMode", "Luminescent Premul", "მანათობელი წინასწარ გამრავლებული"),
+    ("layer.setBlendMode", "Next Blending Mode", "შემდეგი შერევის რეჟიმი"),
+    ("layer.setBlendMode", "Previous Blending Mode", "წინა შერევის რეჟიმი"),
+    ("", "Track Matte", "ტრეკ-მატი"),
+    ("layer.trackMatte", "No Track Matte", "ტრეკ-მატის გარეშე"),
+    ("layer.trackMatte", "Alpha Matte", "ალფა-მატი"),
+    ("layer.trackMatte", "Alpha Inverted Matte", "შებრუნებული ალფა-მატი"),
+    ("layer.trackMatte", "Luma Matte", "ლუმა-მატი"),
+    ("layer.trackMatte", "Luma Inverted Matte", "შებრუნებული ლუმა-მატი"),
+    ("layer.trackMatte", "Matte with Layer Above", "მატი ზედა შრით"),
+    ("layer.trackMatte", "Matte with Layer Below", "მატი ქვედა შრით"),
+    ("", "Layer Styles", "შრის სტილები"),
+    ("layer.style.options", "Layer Style Options...", "შრის სტილის პარამეტრები..."),
+    ("layer.style.convertToEditable", "Convert to Editable Styles", "რედაქტირებად სტილებად გარდაქმნა"),
+    ("layer.style.showAll", "Show All", "ყველას ჩვენება"),
+    ("layer.style.removeAll", "Remove All", "ყველას წაშლა"),
+    ("layer.style.dropShadow", "Drop Shadow", "ჩრდილი"),
+    ("layer.style.innerShadow", "Inner Shadow", "შიდა ჩრდილი"),
+    ("layer.style.outerGlow", "Outer Glow", "გარე ნათება"),
+    ("layer.style.innerGlow", "Inner Glow", "შიდა ნათება"),
+    ("layer.style.bevelEmboss", "Bevel and Emboss", "ფასკა და რელიეფი"),
+    ("layer.style.satin", "Satin", "ატლასი"),
+    ("layer.style.colorOverlay", "Color Overlay", "ფერის გადაფარვა"),
+    ("layer.style.gradientOverlay", "Gradient Overlay", "გრადიენტის გადაფარვა"),
+    ("layer.style.stroke", "Stroke", "კონტური"),
+    ("path.groupShapes", "Group Shapes", "ფიგურების დაჯგუფება"),
+    ("path.ungroupShapes", "Ungroup Shapes", "ფიგურების დაჯგუფების მოხსნა"),
+    ("", "Arrange", "დალაგება"),
+    ("layer.arrange", "Bring Layer to Front", "შრის წინა პლანზე გადმოტანა"),
+    ("layer.arrange", "Bring Layer Forward", "შრის წინ გადმოტანა"),
+    ("layer.arrange", "Send Layer Backward", "შრის უკან გადატანა"),
+    ("layer.arrange", "Send Layer to Back", "შრის უკანა პლანზე გადატანა"),
+    ("", "Reveal", "ჩვენება"),
+    ("layer.revealSource", "Reveal Layer Source in Project", "შრის წყაროს ჩვენება პროექტში"),
+    ("comp.flowchart", "Reveal Layer in Project Flowchart", "შრის ჩვენება პროექტის ბლოკ-სქემაში"),
+    ("comp.revealInProject", "Reveal Composition in Project", "კომპოზიციის ჩვენება პროექტში"),
+    ("layer.revealExpressionErrors", "Reveal Expression Errors", "ექსპრესიის შეცდომების ჩვენება"),
+    ("", "Create", "შექმნა"),
+    ("layer.create", "Convert to Editable Text", "რედაქტირებად ტექსტად გარდაქმნა"),
+    ("layer.create", "Create Shapes from Text", "ფიგურების შექმნა ტექსტიდან"),
+    ("layer.create", "Create Masks from Text", "ნიღბების შექმნა ტექსტიდან"),
+    ("layer.create", "Create Shapes from Vector Layer", "ფიგურების შექმნა ვექტორული შრიდან"),
+    ("layer.create", "Create Keyframes from Data", "საკვანძო კადრების შექმნა მონაცემებიდან"),
+    ("layer.create", "Null Controllers for Positional Points", "ნულოვანი მართვის ობიექტები პოზიციის წერტილებისთვის"),
+    ("layer.create", "Null Controllers for Path Points", "ნულოვანი მართვის ობიექტები ტრაექტორიის წერტილებისთვის"),
+    ("layer.create", "Nulls Following Path Points", "ტრაექტორიის წერტილებს მიმყოლი ნულოვანი ობიექტები"),
+    ("layer.create", "Null Tracing Along Path", "ტრაექტორიის გასწვრივ მოძრავი ნულოვანი ობიექტი"),
+    ("layer.create", "Create 3D Layer Instance", "3D შრის ეგზემპლარის შექმნა"),
+    ("", "Camera", "კამერა"),
+    ("camera.fromView", "Create Camera from 3D View", "კამერის შექმნა 3D ხედიდან"),
+    ("camera.stereoRig", "Create Stereo 3D Rig", "სტერეო 3D სისტემის შექმნა"),
+    ("camera.orbitNull", "Create Orbit Null", "ორბიტის ნულოვანი ობიექტის შექმნა"),
+    ("camera.fromModel", "Create Cameras from 3D Model", "კამერების შექმნა 3D მოდელიდან"),
+    ("camera.linkFocusToPoi", "Link Focus Distance to Point of Interest", "ფოკუსური მანძილის მიბმა ინტერესის წერტილზე"),
+    ("camera.linkFocusToLayer", "Link Focus Distance to Layer", "ფოკუსური მანძილის მიბმა შრეზე"),
+    ("camera.setFocusToLayer", "Set Focus Distance to Layer", "ფოკუსური მანძილის დაყენება შრეზე"),
+    ("layer.cameraSettings", "Camera Settings...", "კამერის პარამეტრები..."),
+    ("view.reset3DView", "Reset 3D View", "3D ხედის ჩამოყრა"),
+    ("", "Light", "სინათლე"),
+    ("light.fromModel", "Create Lights from 3D Model", "სინათლის წყაროების შექმნა 3D მოდელიდან"),
+    ("light.controlWithCamera", "Control Light with Camera", "სინათლის მართვა კამერით"),
+    ("light.environmentBackground", "Create Environment Light Background Layer", "გარემოს სინათლის ფონური შრის შექმნა"),
+    ("", "Material", "მასალა"),
+    ("material.revealSource", "Reveal Material Source in Project", "მასალის წყაროს ჩვენება პროექტში"),
+    ("material.reset", "Reset Material", "მასალის ჩამოყრა"),
+    ("material.duplicateAssign", "Duplicate and Assign Material", "მასალის დუბლირება და მინიჭება"),
+    ("layer.autoTrace", "Auto-trace...", "ავტომატური ვექტორიზაცია..."),
+    ("layer.precompose", "Pre-compose...", "კომპოზიციაში მოთავსება..."),
+    ("layer.sceneEditDetection", "Scene Edit Detection...", "სცენების ჭრილების ამოცნობა..."),
+    ("", "Effect", "ეფექტი"),
+    ("window.panel", "Effect Controls", "ეფექტის მართვა"),
+    ("effect.applyLast", "Last Effect", "ბოლო ეფექტი"),
+    ("effect.removeAll", "Remove All", "ყველას წაშლა"),
+    ("effect.manage", "Manage Effects...", "ეფექტების მართვა..."),
+    ("effect.plugins.load", "Load Effect Plug-in...", "ეფექტის პლაგინის ჩატვირთვა..."),
+    ("", "Animation", "ანიმაცია"),
+    ("anim.savePreset", "Save Animation Preset...", "ანიმაციის პრესეტის შენახვა..."),
+    ("anim.applyPreset", "Apply Animation Preset...", "ანიმაციის პრესეტის გამოყენება..."),
+    ("", "Recent Animation Presets", "ბოლო ანიმაციის პრესეტები"),
+    ("anim.clearRecentPresets", "Clear Recent Presets", "ბოლო პრესეტების სიის გასუფთავება"),
+    ("anim.browsePresets", "Browse Presets...", "პრესეტების დათვალიერება..."),
+    ("", "Text Animation Presets", "ტექსტის ანიმაციის პრესეტები"),
+    ("layer.applyTextPreset", "Typewriter", "საბეჭდი მანქანა"),
+    ("layer.applyTextPreset", "Fade Up Characters", "ასოების ამოსვლა გამოჩენით"),
+    ("layer.applyTextPreset", "Bounce In Words", "სიტყვების ხტუნვით შემოსვლა"),
+    ("layer.applyTextPreset", "Tracking In", "ასოების შეკუმშვით შემოსვლა"),
+    ("layer.applyTextPreset", "Scramble", "არევა"),
+    ("layer.applyTextPreset", "Blur In", "გამოჩენა გაბუნდოვნებიდან"),
+    ("layer.applyTextPreset", "Jitter", "კანკალი"),
+    ("layer.applyTextPreset", "Drop In Lines", "სტრიქონების ჩამოვარდნა"),
+    ("anim.addKeyframe", "Add Keyframe", "საკვანძო კადრის დამატება"),
+    ("keys.toggleHold", "Toggle Hold Keyframe", "ფიქსირებული საკვანძო კადრის გადართვა"),
+    ("keys.interpolation", "Keyframe Interpolation...", "საკვანძო კადრის ინტერპოლაცია..."),
+    ("keys.velocity", "Keyframe Velocity...", "საკვანძო კადრის სიჩქარე..."),
+    ("", "Keyframe Assistant", "საკვანძო კადრების ასისტენტი"),
+    ("keys.audioToKeyframes", "Convert Audio to Keyframes", "აუდიოს საკვანძო კადრებად გარდაქმნა"),
+    ("prop.convertExpressionToKeyframes", "Convert Expression to Keyframes", "ექსპრესიის საკვანძო კადრებად გარდაქმნა"),
+    ("keys.easyEase", "Easy Ease", "რბილი შენელება"),
+    ("keys.easyEaseIn", "Easy Ease In", "რბილი შენელება შესვლისას"),
+    ("keys.easyEaseOut", "Easy Ease Out", "რბილი შენელება გამოსვლისას"),
+    ("keys.exponentialScale", "Exponential Scale", "ექსპონენციალური მასშტაბი"),
+    ("keys.rpfCameraImport", "RPF Camera Import", "RPF კამერის იმპორტი"),
+    ("layer.sequence", "Sequence Layers...", "შრეების თანმიმდევრობით განლაგება..."),
+    ("keys.timeReverse", "Time-Reverse Keyframes", "საკვანძო კადრების დროში შებრუნება"),
+    ("", "Animate Text", "ტექსტის ანიმირება"),
+    ("layer.enablePerChar3D", "Enable Per-character 3D", "თითოეული ასოს 3D-ს ჩართვა"),
+    ("layer.addTextAnimator", "Anchor Point", "საყრდენი წერტილი"),
+    ("layer.addTextAnimator", "Position", "პოზიცია"),
+    ("layer.addTextAnimator", "Scale", "მასშტაბი"),
+    ("layer.addTextAnimator", "Skew", "დახრა"),
+    ("layer.addTextAnimator", "Rotation", "შემობრუნება"),
+    ("layer.addTextAnimator", "Opacity", "გაუმჭვირვალობა"),
+    ("layer.addTextAnimator", "All Transform Properties", "გარდაქმნის ყველა თვისება"),
+    ("", "Fill Color", "შევსების ფერი"),
+    ("layer.addTextAnimator", "RGB", "RGB"),
+    ("layer.addTextAnimator", "Hue", "ფერის ტონი"),
+    ("layer.addTextAnimator", "Saturation", "გაჯერება"),
+    ("layer.addTextAnimator", "Brightness", "სიკაშკაშე"),
+    ("", "Stroke Color", "კონტურის ფერი"),
+    ("layer.addTextAnimator", "Stroke Width", "კონტურის სისქე"),
+    ("", "Front", "წინა მხარე"),
+    ("", "Bevel", "წაკვეთა"),
+    ("", "Side", "გვერდითი მხარე"),
+    ("", "Back", "უკანა მხარე"),
+    ("layer.addTextAnimator", "Color", "ფერი"),
+    ("layer.addTextAnimator", "Tracking", "ასოთაშორისი ინტერვალი"),
+    ("layer.addTextAnimator", "Line Anchor", "სტრიქონის საყრდენი"),
+    ("layer.addTextAnimator", "Line Spacing", "სტრიქონთა დაშორება"),
+    ("layer.addTextAnimator", "Character Offset", "ასოს წანაცვლება"),
+    ("layer.addTextAnimator", "Character Value", "ასოს მნიშვნელობა"),
+    ("layer.addTextAnimator", "Blur", "გაბუნდოვნება"),
+    ("text.animatorFontAxes", "Variable Font Axes", "ცვლადი შრიფტის ღერძები"),
+    ("", "Add Text Selector", "ტექსტის სელექტორის დამატება"),
+    ("text.addSelector", "Range", "დიაპაზონი"),
+    ("text.addSelector", "Wiggly", "რხევითი"),
+    ("text.addSelector", "Expression", "ექსპრესია"),
+    ("text.removeAllAnimators", "Remove All Text Animators", "ტექსტის ყველა ანიმატორის წაშლა"),
+    ("prop.setExpression", "Add Expression", "ექსპრესიის დამატება"),
+    ("essential.addProperty", "Add Property to Essential Graphics", "თვისების დამატება ძირითად გრაფიკაში"),
+    ("prop.separateDimensions", "Separate Dimensions", "განზომილებების გაყოფა"),
+    ("track.camera", "Track Camera", "კამერის ტრეკინგი"),
+    ("track.warpStabilizer", "Warp Stabilizer VFX", "Warp Stabilizer VFX"),
+    ("track.motion", "Track Motion", "მოძრაობის ტრეკინგი"),
+    ("track.stabilize", "Stabilize Motion", "მოძრაობის სტაბილიზაცია"),
+    ("track.property", "Track this Property", "ამ თვისების ტრეკინგი"),
+    ("anim.reveal", "Reveal Properties with Keyframes", "საკვანძო კადრების მქონე თვისებების ჩვენება"),
+    ("anim.reveal", "Reveal Properties with Animation", "ანიმაციის მქონე თვისებების ჩვენება"),
+    ("anim.reveal", "Reveal All Modified Properties", "ყველა შეცვლილი თვისების ჩვენება"),
+    ("", "View", "ხედი"),
+    ("view.newViewer", "New Viewer", "ახალი დამთვალიერებელი"),
+    ("view.splitLockedViewer", "Split with New Locked Viewer", "დაყოფა ახალი ჩაკეტილი დამთვალიერებელით"),
+    ("view.zoomIn", "Zoom In", "გადიდება"),
+    ("view.zoomOut", "Zoom Out", "დაპატარავება"),
+    ("", "Resolution", "გარჩევადობა"),
+    ("view.res.full", "Full", "სრული"),
+    ("view.res.half", "Half", "ნახევარი"),
+    ("view.res.third", "Third", "მესამედი"),
+    ("view.res.quarter", "Quarter", "მეოთხედი"),
+    ("view.res.custom", "Custom...", "მორგებული..."),
+    ("view.displayColorManagement", "Use Display Color Management", "ეკრანის ფერთა მართვის გამოყენება"),
+    ("", "Simulate Output", "გამოტანის იმიტაცია"),
+    ("view.simulateOutput", "No Output Simulation", "გამოტანის იმიტაციის გარეშე"),
+    ("view.simulateOutput", "HDTV (Rec. 709)", "HDTV (Rec. 709)"),
+    ("view.simulateOutput", "SDTV NTSC", "SDTV NTSC"),
+    ("view.simulateOutput", "SDTV PAL", "SDTV PAL"),
+    ("view.simulateOutput", "Legacy Macintosh RGB (Gamma 1.8)", "ძველი Macintosh RGB (გამა 1.8)"),
+    ("view.simulateOutput", "Internet Standard RGB (sRGB)", "ინტერნეტის სტანდარტული RGB (sRGB)"),
+    ("view.simulateOutput", "UHDTV (Rec. 2020)", "UHDTV (Rec. 2020)"),
+    ("view.simulateOutput", "Display P3", "Display P3"),
+    ("view.simulateOutput", "Linear (1.0 Gamma)", "წრფივი (გამა 1.0)"),
+    ("view.customRgb", "My Custom RGB...", "ჩემი მორგებული RGB..."),
+    ("view.simulateOutput", "Custom...", "მორგებული..."),
+    ("view.rulers", "Show Rulers", "სახაზავების ჩვენება"),
+    ("", "Panel Background Color", "პანელის ფონის ფერი"),
+    ("view.panelBackground", "Black", "შავი"),
+    ("view.panelBackground", "Dark Gray", "მუქი ნაცრისფერი"),
+    ("view.panelBackground", "Medium Gray (Default)", "საშუალო ნაცრისფერი (ნაგულისხმევი)"),
+    ("view.panelBackground", "Light Gray", "ღია ნაცრისფერი"),
+    ("view.panelBackground", "White", "თეთრი"),
+    ("view.panelBackground", "Custom", "მორგებული"),
+    ("view.panelBackground", "Select Custom Background Color...", "მორგებული ფონის ფერის არჩევა..."),
+    ("view.guides", "Show Guides", "დამხმარე ხაზების ჩვენება"),
+    ("view.snapToGuides", "Snap to Guides", "დამხმარე ხაზებზე მიბმა"),
+    ("view.lockGuides", "Lock Guides", "დამხმარე ხაზების ჩაკეტვა"),
+    ("view.addGuide", "Add Guide...", "დამხმარე ხაზის დამატება..."),
+    ("view.addPercentGuide", "Add Percentage Guide...", "პროცენტული დამხმარე ხაზის დამატება..."),
+    ("view.convertGuides", "Convert Guides to Percentage", "დამხმარე ხაზების პროცენტულად გარდაქმნა"),
+    ("view.convertGuides", "Convert Guides to Pixels", "დამხმარე ხაზების პიქსელებად გარდაქმნა"),
+    ("view.clearGuides", "Clear Guides", "დამხმარე ხაზების გასუფთავება"),
+    ("view.importGuides", "Import Guides...", "დამხმარე ხაზების იმპორტი..."),
+    ("view.exportGuides", "Export Guides...", "დამხმარე ხაზების ექსპორტი..."),
+    ("view.grid", "Show Grid", "ბადის ჩვენება"),
+    ("view.snapToGrid", "Snap to Grid", "ბადეზე მიბმა"),
+    ("view.snapping", "Snapping", "მიბმა"),
+    ("view.options", "View Options...", "ხედის პარამეტრები..."),
+    ("view.layerControls", "Show Layer Controls", "შრის მართვის ელემენტების ჩვენება"),
+    ("", "Switch View Layout", "ხედების განლაგების გადართვა"),
+    ("view.layout", "1 View", "1 ხედი"),
+    ("view.layout", "2 Views", "2 ხედი"),
+    ("view.layout", "4 Views", "4 ხედი"),
+    ("view.shareViewOptions", "Share View Options", "ხედის პარამეტრების გაზიარება"),
+    ("", "Switch 3D View", "3D ხედის გადართვა"),
+    ("view.3d.activeCamera", "Active Camera", "აქტიური კამერა"),
+    ("view.3d.default", "Default", "ნაგულისხმევი"),
+    ("view.3d.front", "Front", "წინიდან"),
+    ("view.3d.left", "Left", "მარცხნიდან"),
+    ("view.3d.top", "Top", "ზემოდან"),
+    ("view.3d.back", "Back", "უკნიდან"),
+    ("view.3d.right", "Right", "მარჯვნიდან"),
+    ("view.3d.bottom", "Bottom", "ქვემოდან"),
+    ("view.3d.custom1", "Custom View 1", "მორგებული ხედი 1"),
+    ("view.3d.custom2", "Custom View 2", "მორგებული ხედი 2"),
+    ("view.3d.custom3", "Custom View 3", "მორგებული ხედი 3"),
+    ("", "Assign Shortcut to 3D View", "მალსახმობის მინიჭება 3D ხედისთვის"),
+    ("view.3d.last", "Switch to Last 3D View", "ბოლო 3D ხედზე გადართვა"),
+    ("view.lookAtSelected", "Look at Selected Layers", "მონიშნული შრეების დათვალიერება"),
+    ("view.lookAtAll", "Look at All Layers", "ყველა შრის დათვალიერება"),
+    ("time.set", "Go to Time...", "დროზე გადასვლა..."),
+    ("view.fullScreen", "Enter Full Screen", "სრულეკრანიან რეჟიმში გადასვლა"),
+    ("", "Window", "ფანჯარა"),
+    ("", "Workspace", "სამუშაო სივრცე"),
+    ("window.workspace", "Default", "ნაგულისხმევი"),
+    ("window.workspace", "Review", "განხილვა"),
+    ("window.workspace", "Learn", "სწავლა"),
+    ("window.workspace", "Small Screen", "პატარა ეკრანი"),
+    ("window.workspace", "Standard", "სტანდარტული"),
+    ("window.workspace", "All Panels", "ყველა პანელი"),
+    ("window.workspace", "Animation", "ანიმაცია"),
+    ("window.workspace", "Color", "ფერი"),
+    ("window.workspace", "Effects", "ეფექტები"),
+    ("window.workspace", "Essential Graphics", "ძირითადი გრაფიკა"),
+    ("window.workspace", "Minimal", "მინიმალური"),
+    ("window.workspace", "Motion Tracking", "მოძრაობის ტრეკინგი"),
+    ("window.workspace", "Paint", "ხატვა"),
+    ("window.workspace", "Text", "ტექსტი"),
+    ("window.workspace", "Undocked Panels", "მოხსნილი პანელები"),
+    ("window.resetWorkspace", "Reset to Saved Layout", "შენახულ განლაგებაზე დაბრუნება"),
+    ("window.saveWorkspace", "Save Changes to this Workspace", "ამ სამუშაო სივრცეში ცვლილებების შენახვა"),
+    ("window.saveWorkspaceAs", "Save as New Workspace...", "ახალ სამუშაო სივრცედ შენახვა..."),
+    ("window.editWorkspaces", "Edit Workspaces...", "სამუშაო სივრცეების რედაქტირება..."),
+    ("", "Assign Shortcut to Workspace", "მალსახმობის მინიჭება სამუშაო სივრცისთვის"),
+    ("window.panel", "Align", "სწორება"),
+    ("window.panel", "Audio", "აუდიო"),
+    ("window.panel", "Brushes", "ფუნჯები"),
+    ("window.panel", "Character", "სიმბოლო"),
+    ("window.panel", "Content-Aware Fill", "შიგთავსის გათვალისწინებით შევსება"),
+    ("window.panel", "Effects & Presets", "ეფექტები და პრესეტები"),
+    ("window.panel", "Essential Graphics", "ძირითადი გრაფიკა"),
+    ("window.panel", "Info", "ინფორმაცია"),
+    ("help.inAppTutorials", "Learn", "სწავლა"),
+    ("window.panel", "Lumetri Scopes", "Lumetri Scopes"),
+    ("window.panel", "Mask Interpolation", "ნიღბის ინტერპოლაცია"),
+    ("window.panel", "Media Browser", "მედიის ბრაუზერი"),
+    ("window.panel", "Metadata", "მეტამონაცემები"),
+    ("window.panel", "Motion Sketch", "მოძრაობის ესკიზი"),
+    ("window.panel", "Paint", "ხატვა"),
+    ("window.panel", "Paragraph", "აბზაცი"),
+    ("window.panel", "Preview", "წინასწარი ნახვა"),
+    ("window.panel", "Progress", "პროგრესი"),
+    ("window.panel", "Properties", "თვისებები"),
+    ("window.panel", "Script Console", "სკრიპტის კონსოლი"),
+    ("window.panel", "Smoother", "დამგლუვებელი"),
+    ("window.panel", "Tools", "ხელსაწყოები"),
+    ("window.panel", "Tracker", "ტრეკერი"),
+    ("window.panel", "Wiggler", "რხევის გენერატორი"),
+    ("window.panel", "Composition", "კომპოზიცია"),
+    ("window.panel", "Flowchart", "ბლოკ-სქემა"),
+    ("window.panel", "Footage", "ვიდეომასალა"),
+    ("window.panel", "Layer", "შრე"),
+    ("window.panel", "Project", "პროექტი"),
+    ("window.panel", "Render Queue", "რენდერის რიგი"),
+    ("window.panel", "Timeline", "დროის ხაზი"),
+    ("window.panel", "Create Nulls From Paths", "ნულოვანი ობიექტების შექმნა ტრაექტორიებიდან"),
+    ("window.panel", "VR Comp Editor", "VR კომპოზიციის რედაქტორი"),
+    ("", "Help", "დახმარება"),
+    ("help.docs", "EffectCraft Help...", "EffectCraft-ის დახმარება..."),
+    ("help.docs", "Scripting Help...", "სკრიპტების დახმარება..."),
+    ("help.docs", "Expression Reference...", "ექსპრესიების ცნობარი..."),
+    ("help.docs", "Effect Reference...", "ეფექტების ცნობარი..."),
+    ("anim.browsePresets", "Animation Presets...", "ანიმაციის პრესეტები..."),
+    ("app.keyboardShortcuts", "Keyboard Shortcuts...", "კლავიატურის მალსახმობები..."),
+    ("help.inAppTutorials", "In-App Tutorials...", "აპის შიგნით გაკვეთილები..."),
+    ("help.onlineTutorials", "Online Tutorials...", "ონლაინ გაკვეთილები..."),
+    ("help.systemReport", "System Compatibility Report...", "სისტემის თავსებადობის ანგარიში..."),
+    ("help.enableLogging", "Enable Logging", "ჟურნალის ჩართვა"),
+    ("help.revealLogFile", "Reveal Logging File", "ჟურნალის ფაილის ჩვენება"),
+    ("help.discord", "Join the ArtCraft Discord...", "შემოუერთდით ArtCraft-ის Discord-ს..."),
+    ("help.reportIssue", "Provide Feedback...", "გამოხმაურების გაგზავნა..."),
+    ("help.website", "ArtCraft Website", "ArtCraft-ის ვებსაიტი"),
+    ("help.appPage", "EffectCraft Home Page", "EffectCraft-ის საწყისი გვერდი"),
+    ("help.github", "EffectCraft on GitHub", "EffectCraft GitHub-ზე"),
+    ("file.openDemoProject", "Open Demo Project", "სადემონსტრაციო პროექტის გახსნა"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6753,6 +7416,22 @@ mod tests {
         }
     }
 
+    #[test]
+    fn georgian_reveal_labels_follow_the_platform_file_manager() {
+        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
+        app.session.execute("prefs.set", json!({"key": "general.language", "value": "ka"})).unwrap();
+        for command in ["file.revealInFinder", "layer.revealInFinder"] {
+            for (source, translated) in [
+                ("Reveal in Finder", "Finder-ში ჩვენება"),
+                ("Reveal in Explorer", "Explorer-ში ჩვენება"),
+                ("Reveal in File Manager", "ფაილების მენეჯერში ჩვენება"),
+            ] {
+                assert_eq!(label(&app, command, source), translated);
+                assert_eq!(label(&app, "file.openRecent", source), source);
+            }
+        }
+    }
+
     fn keys(nodes: &[MenuNode], out: &mut BTreeSet<(String, String)>) {
         for node in nodes {
             match node {
@@ -6784,6 +7463,7 @@ mod tests {
         let mut french_keys = BTreeSet::new();
         let mut german_keys = BTreeSet::new();
         let mut czech_keys = BTreeSet::new();
+        let mut georgian_keys = BTreeSet::new();
         for (catalog, unique) in [
             (JAPANESE, &mut japanese_keys),
             (SIMPLIFIED_CHINESE, &mut chinese_keys),
@@ -6795,6 +7475,7 @@ mod tests {
             (FRENCH, &mut french_keys),
             (GERMAN, &mut german_keys),
             (CZECH, &mut czech_keys),
+            (GEORGIAN, &mut georgian_keys),
         ] {
             for (command, en, translated) in catalog {
                 let key = (command.to_string(), en.to_string());
@@ -6825,6 +7506,7 @@ mod tests {
         assert_eq!(russian_keys, french_keys, "the languages must translate the same entries");
         assert_eq!(french_keys, german_keys, "the languages must translate the same entries");
         assert_eq!(japanese_keys, czech_keys, "the languages must translate the same entries");
+        assert_eq!(japanese_keys, georgian_keys, "the languages must translate the same entries");
     }
 
     /// Exercise each engine spelling on every host: a macOS-only run must still catch a
@@ -6911,6 +7593,9 @@ mod tests {
             (Some("cs-CZ"), "cs"),
             (Some("cs_CZ.UTF-8"), "cs"),
             (Some("CS_cz.UTF-8"), "cs"),
+            (Some("ka"), "ka"),
+            (Some("ka-GE"), "ka"),
+            (Some("ka_GE.UTF-8"), "ka"),
             (Some("en-US"), "en"),
             (Some("jv-ID"), "en"),
             (Some("de-DE"), "en"),
@@ -6944,9 +7629,15 @@ mod tests {
 
     #[test]
     fn every_translated_entry_keeps_the_english_shape() {
-        for (code, catalog) in
-            [("zh-hans", SIMPLIFIED_CHINESE), ("zh-hant", TRADITIONAL_CHINESE), ("uk", UKRAINIAN), ("es", SPANISH), ("pt-br", PORTUGUESE), ("cs", CZECH)]
-        {
+        for (code, catalog) in [
+            ("zh-hans", SIMPLIFIED_CHINESE),
+            ("zh-hant", TRADITIONAL_CHINESE),
+            ("uk", UKRAINIAN),
+            ("es", SPANISH),
+            ("pt-br", PORTUGUESE),
+            ("cs", CZECH),
+            ("ka", GEORGIAN),
+        ] {
             for (command, en, translated) in catalog {
                 assert_eq!(en.contains("..."), translated.contains("..."), "{code} {command} / {en}: {translated}");
                 let brackets = |s: &str| s.chars().filter(|c| *c == '(' || *c == ')').count();
@@ -7188,6 +7879,44 @@ mod tests {
             "Atribuir atalho à área de trabalho “Default”"
         );
         assert_eq!(submenu(&app, "Assign Shortcut to 3D View", "Assign Shortcut to “Top”".into()), "Atribuir atalho à visualização 3D “Top”");
+    }
+
+    #[test]
+    fn ka_translates_menus_without_changing_bindings_or_user_names() {
+        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
+        app.session.execute("prefs.set", json!({"key":"general.language", "value":"en"})).unwrap();
+        let en = crate::native_menu::build(&app);
+        app.session.execute("prefs.set", json!({"key":"general.language", "value":"ka"})).unwrap();
+        assert_eq!(language(&app), "ka");
+        assert!(georgian(&app));
+        assert!(!japanese(&app));
+        let ka = crate::native_menu::build(&app);
+        let bindings = |menu: &crate::native_menu::NativeMenu| {
+            menu.items().into_iter().map(|i| (i.id.clone(), i.command.clone(), i.params.clone(), i.shortcut.clone(), i.enabled, i.checked)).collect::<Vec<_>>()
+        };
+        assert_eq!(bindings(&en), bindings(&ka));
+        assert_eq!(label(&app, "", "Composition"), "კომპოზიცია");
+        assert_eq!(label(&app, "", "Layer"), "შრე");
+        assert_eq!(label(&app, "comp.new", "New Composition..."), "ახალი კომპოზიცია...");
+        assert_eq!(label(&app, "anim.addKeyframe", "Add Keyframe"), "საკვანძო კადრის დამატება");
+        assert_eq!(label(&app, "unknown.command", "Text"), "Text");
+        assert!(ka.items().iter().any(|i| i.command == "keys.easyEase" && i.label == "რბილი შენელება"));
+        let undo = MenuEntry { label: "Undo".into(), command: "edit.undo".into(), params: json!({}), shortcut: None, alt_shortcuts: vec![] };
+        assert_eq!(entry(&app, &undo, "Can't Undo".into()), "დაბრუნება შეუძლებელია");
+        app.session.history.undo.push(("Comp 1".into(), app.session.project.clone()));
+        assert_eq!(entry(&app, &undo, "Undo Comp 1".into()), "დაბრუნება: Comp 1");
+        let panel =
+            MenuEntry { label: "Layer".into(), command: "window.panel".into(), params: json!({"panel":"layer"}), shortcut: None, alt_shortcuts: vec![] };
+        assert_eq!(entry(&app, &panel, "Layer: File".into()), "შრე: File");
+        assert_eq!(
+            submenu(&app, "Assign Shortcut to Workspace", "Assign Shortcut to “Default” Workspace".into()),
+            "მალსახმობის მინიჭება სამუშაო სივრცისთვის „Default“"
+        );
+        assert_eq!(submenu(&app, "Assign Shortcut to 3D View", "Assign Shortcut to “Top”".into()), "მალსახმობის მინიჭება 3D ხედისთვის „Top“");
+        // A dynamic filename is never translated.
+        app.session.prefs.push_recent("/tmp/File.ecproj");
+        assert!(crate::native_menu::build(&app).items().iter().any(|i| i.command == "file.openRecent" && i.label == "File.ecproj"));
+        assert!(effectcraft_engine::prefs::LANGUAGES.contains(&("ქართული", "ka")));
     }
 
     #[test]
