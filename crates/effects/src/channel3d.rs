@@ -395,13 +395,37 @@ fn crypto_matte(planes: &RankPlanes, sel: &[u32], i: usize) -> f32 {
         .clamp(0.0, 1.0)
 }
 
+/// [`id_color`] of the last ID seen on each rank plane, per worker. Neighbouring pixels mostly
+/// carry the same IDs, so this skips the hash and the HSL conversion for most of them. Keyed by the
+/// ID's bits, so it returns exactly what [`id_color`] would.
+///
+/// Keep the per-pixel loop below as it is: with NaN coverage, which NaN payload ends up in a
+/// channel depends on the order the compiler adds the ranks in, and a row-wise loop let it reorder
+/// them (`crypto_aux_image_is_bit_exact_on_edge_values` catches that).
+#[derive(Default)]
+struct IdColorMemo(Vec<(u32, [f32; 3])>);
+
+impl IdColorMemo {
+    #[inline]
+    fn get(&mut self, rank: usize, id: f32) -> [f32; 3] {
+        if self.0.len() <= rank {
+            self.0.resize(rank + 1, (id.to_bits(), id_color(id)));
+        }
+        let e = &mut self.0[rank];
+        if e.0 != id.to_bits() {
+            *e = (id.to_bits(), id_color(id));
+        }
+        e.1
+    }
+}
+
 /// The coverage-weighted ID colours at aux pixel `i` (the spec's preview).
 #[inline]
-fn crypto_colors(planes: &RankPlanes, i: usize) -> [f32; 3] {
+fn crypto_colors(planes: &RankPlanes, i: usize, memo: &mut IdColorMemo) -> [f32; 3] {
     let mut c = [0.0f32; 3];
-    for (id, cov) in planes {
+    for (rank, (id, cov)) in planes.iter().enumerate() {
         let (Some(&id), Some(&cov)) = (id.get(i), cov.get(i)) else { continue };
-        let k = id_color(id);
+        let k = memo.get(rank, id);
         for j in 0..3 {
             c[j] += k[j] * cov;
         }
@@ -421,8 +445,8 @@ pub fn crypto_aux_image(a: &AuxChannels, layer: &str, sel: &[u32]) -> Image {
 pub fn crypto_aux_image_with(a: &AuxChannels, layer: &str, sel: &[u32], colors: bool) -> Image {
     let planes = a.crypto_rank_planes(layer);
     let mut img = Image::new(a.width, a.height);
-    img.data.par_iter_mut().enumerate().for_each(|(i, px)| {
-        let c = if colors { crypto_colors(&planes, i) } else { [0.0; 3] };
+    img.data.par_iter_mut().enumerate().for_each_init(IdColorMemo::default, |memo, (i, px)| {
+        let c = if colors { crypto_colors(&planes, i, memo) } else { [0.0; 3] };
         *px = [c[0], c[1], c[2], crypto_matte(&planes, sel, i)];
     });
     img
@@ -442,7 +466,7 @@ fn cryptomatte(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let display = ctx.params.e("display");
     let matte_only = ctx.params.b("matteOnly");
     let planes = a.crypto_rank_planes(&layer);
-    b.img.data.par_iter_mut().enumerate().for_each(|(i, px)| {
+    b.img.data.par_iter_mut().enumerate().for_each_init(IdColorMemo::default, |memo, (i, px)| {
         let m = idx[i].map_or(0.0, |k| crypto_matte(&planes, &sel, k));
         if matte_only {
             *px = [m, m, m, m];
@@ -451,7 +475,7 @@ fn cryptomatte(ctx: &EffectCtx, mut b: Buf) -> Buf {
         *px = match display {
             // Colors: coverage-weighted ID colours (the spec's preview), selection brighter.
             0 => {
-                let c = idx[i].map_or([0.0; 3], |k| crypto_colors(&planes, k));
+                let c = idx[i].map_or([0.0; 3], |k| crypto_colors(&planes, k, memo));
                 let c = c.map(|v| v * (1.0 - 0.5 * m) + 0.5 * m);
                 [c[0], c[1], c[2], 1.0]
             }
@@ -817,6 +841,20 @@ mod tests {
             push("03.A", vec![1.0; 12]);
         }
         a
+    }
+
+    /// The memo hands out exactly `id_color`'s bits for every rank and pixel of the edge values
+    /// (NaN IDs with and without a payload, -0.0 and 0.0 are keyed by their bits).
+    #[test]
+    fn id_color_memo_matches_id_color() {
+        let a = edge_aux(true);
+        let planes = a.crypto_rank_planes("CryptoObject");
+        let mut memo = IdColorMemo::default();
+        for i in 0..12 {
+            for (r, (id, _)) in planes.iter().enumerate() {
+                assert_eq!(memo.get(r, id[i]).map(f32::to_bits), id_color(id[i]).map(f32::to_bits), "pixel {i} rank {r}");
+            }
+        }
     }
 
     fn edge_selection() -> Vec<u32> {
