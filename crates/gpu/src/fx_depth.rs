@@ -278,7 +278,10 @@ fn cryptomatte(e: &mut Enc, ctx: &EffectCtx, b: GBuf, a: &AuxChannels) -> Option
     let sel = effectcraft_effects::selection_hashes(pr.s("selection"), manifest);
     // Per aux pixel: coverage-weighted ID colours (RGB) and the selection's coverage (A), on all
     // cores with the rank planes resolved once.
-    let img = effectcraft_effects::crypto_aux_image(a, &layer, &sel);
+    // The ID colours are only read by the Colors display; Matte, Preview and Matte Only need the
+    // matte alone.
+    let colors = pr.e("display") == 0 && !pr.b("matteOnly");
+    let img = effectcraft_effects::crypto_aux_image_with(a, &layer, &sel, colors);
     let tex = e.g.upload_image(&img)?;
     let plane = lookup(e, &b, a, &tex, [0.5, 0.5], [0.0; 4]);
     let mut p = op(7);

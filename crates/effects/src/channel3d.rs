@@ -413,10 +413,16 @@ fn crypto_colors(planes: &RankPlanes, i: usize) -> [f32; 3] {
 /// selection's coverage (A), computed in parallel with the rank planes resolved once. The GPU
 /// effect uploads this image and samples it per layer pixel.
 pub fn crypto_aux_image(a: &AuxChannels, layer: &str, sel: &[u32]) -> Image {
+    crypto_aux_image_with(a, layer, sel, true)
+}
+
+/// [`crypto_aux_image`]; with `colors` false the RGB stays 0 and only the matte (A) is computed,
+/// for the displays that never read the ID colours.
+pub fn crypto_aux_image_with(a: &AuxChannels, layer: &str, sel: &[u32], colors: bool) -> Image {
     let planes = a.crypto_rank_planes(layer);
     let mut img = Image::new(a.width, a.height);
     img.data.par_iter_mut().enumerate().for_each(|(i, px)| {
-        let c = crypto_colors(&planes, i);
+        let c = if colors { crypto_colors(&planes, i) } else { [0.0; 3] };
         *px = [c[0], c[1], c[2], crypto_matte(&planes, sel, i)];
     });
     img
@@ -436,7 +442,6 @@ fn cryptomatte(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let display = ctx.params.e("display");
     let matte_only = ctx.params.b("matteOnly");
     let planes = a.crypto_rank_planes(&layer);
-    let src = b.img.clone();
     b.img.data.par_iter_mut().enumerate().for_each(|(i, px)| {
         let m = idx[i].map_or(0.0, |k| crypto_matte(&planes, &sel, k));
         if matte_only {
@@ -450,11 +455,11 @@ fn cryptomatte(ctx: &EffectCtx, mut b: Buf) -> Buf {
                 let c = c.map(|v| v * (1.0 - 0.5 * m) + 0.5 * m);
                 [c[0], c[1], c[2], 1.0]
             }
-            // Matte: the layer keyed by the selection.
-            1 => src.data[i].map(|v| v * m),
+            // Matte: the layer keyed by the selection (each pixel only reads itself, so no copy).
+            1 => px.map(|v| v * m),
             // Preview: the layer with the selection tinted.
             _ => {
-                let s = src.data[i];
+                let s = *px;
                 [s[0] * (1.0 - 0.5 * m) + 0.5 * m * s[3], s[1] * (1.0 - 0.5 * m) + 0.5 * m * s[3], s[2] * (1.0 - 0.5 * m), s[3]]
             }
         };
@@ -832,6 +837,19 @@ mod tests {
             let want = [c[0], c[1], c[2], m];
             assert_eq!(img.data[i].map(f32::to_bits), want.map(f32::to_bits), "pixel {i}");
             assert_eq!(img.data[i].map(f32::to_bits), without_gap_rank.data[i].map(f32::to_bits), "pixel {i}: the rank after the gap was used");
+        }
+    }
+
+    /// Without the ID colours the matte (A) is bit-identical and the RGB is 0, on the edge values.
+    #[test]
+    fn crypto_aux_image_without_colors_keeps_the_matte() {
+        let a = edge_aux(true);
+        let sel = edge_selection();
+        let full = crypto_aux_image(&a, "CryptoObject", &sel);
+        let matte = crypto_aux_image_with(&a, "CryptoObject", &sel, false);
+        for (f, m) in full.data.iter().zip(&matte.data) {
+            assert_eq!(f[3].to_bits(), m[3].to_bits());
+            assert_eq!(m[..3], [0.0; 3]);
         }
     }
 
