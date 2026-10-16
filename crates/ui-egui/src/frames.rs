@@ -227,6 +227,19 @@ impl Cache {
         }
         self.order.retain(|k| !gone.contains(&k.content));
     }
+    /// Move the frames of identity `from` that `keep` accepts to identity `to` (in place in the
+    /// eviction order), unless `to` already has them.
+    fn carry(&mut self, from: u64, to: u64, keep: impl Fn(i64) -> bool) {
+        for k in self.order.iter_mut().filter(|k| k.content == from && keep(k.frame)) {
+            let moved = FrameKey { content: to, ..*k };
+            if !self.map.contains_key(&moved)
+                && let Some(img) = self.map.remove(k)
+            {
+                self.map.insert(moved, img);
+                *k = moved;
+            }
+        }
+    }
     fn evict_to_budget(&mut self) {
         while self.bytes > self.budget {
             let Some(old) = self.victim().and_then(|i| self.order.remove(i)) else { break };
@@ -730,6 +743,21 @@ impl Frames {
             }) == *base_id
         {
             return (*base_id, Some(base.clone()));
+        }
+        // Only layers of this comp changed: its frames outside their span (a frame either side
+        // for motion blur) keep drawing the same pixels, so a cut or trim recaches only the
+        // layers it touched (#1641).
+        if let Some((base_id, base)) = bases.get(&comp.0)
+            && let (Some(old), Some(new)) = (base.comp(comp), project.comp(comp))
+            && comp_content_with(project, comp, |id, c| match base.item(id).map(|i| &i.kind) {
+                Some(ItemKind::Comp(b)) if id == comp || Arc::ptr_eq(b, c) || same_pixels(b, c, markers_count) => Arc::as_ptr(b),
+                _ => Arc::as_ptr(c),
+            }) == *base_id
+            && let Some((s, e)) = new.changed_span(old)
+            && let Ok(mut cache) = self.cache.lock()
+        {
+            let (first, last) = (new.frame_rate.frame_at(s).saturating_sub(1), new.frame_rate.frame_at(e).saturating_add(1));
+            cache.carry(*base_id, plain, |f| f < first || f > last);
         }
         if bases.len() > MAX_KEEPERS {
             bases.clear();
@@ -1988,6 +2016,43 @@ mod tests {
         assert_eq!(at(&s), o1, "a mute after a real edit keeps that edit's frames");
         switch(&mut s, inner, solid, "video", true);
         assert_ne!(at(&s), o1);
+    }
+
+    /// A cut or trim recaches only the frames of the layers it touched (#1641), and none are
+    /// kept when the change reaches other layers (here a child of the trimmed layer).
+    #[test]
+    fn an_edit_keeps_the_frames_outside_the_layers_it_changed() {
+        use effectcraft_engine::Session;
+        use serde_json::json;
+        let mut s = Session::default();
+        let id = |v: serde_json::Value, k: &str| v[k].as_u64().unwrap();
+        let comp = ItemId(id(s.execute("comp.new", json!({"name": "Edit", "width": 8, "height": 8, "duration": 10})).unwrap(), "comp"));
+        let a = id(s.execute("layer.newSolid", json!({"comp": comp.0, "color": "#ff0000"})).unwrap(), "layer");
+        let b = id(s.execute("layer.newSolid", json!({"comp": comp.0, "color": "#00ff00"})).unwrap(), "layer");
+        s.execute("layer.timing", json!({"layers": [a], "in": 0, "out": 4})).unwrap();
+        s.execute("layer.timing", json!({"layers": [b], "in": 4, "out": 10})).unwrap();
+        let (fr, out) = s.project.comp(comp).map(|c| (c.frame_rate, c.layers.iter().find(|l| l.id.0 == a).unwrap().out_point)).unwrap();
+        let frames: Vec<i64> = (0..fr.frame_at(Tick::from_seconds_f64(10.0))).collect();
+        let f = Frames::default();
+        let cache_all = |s: &Session| {
+            let c = f.content_of(&s.project, s.revision, comp);
+            frames.iter().for_each(|&n| insert(&f, key(c, n, 0)));
+            c
+        };
+        let cached = |c: u64| frames.iter().filter(|&&n| f.is_cached(&key(c, n, 0))).copied().collect::<Vec<_>>();
+        let before = cache_all(&s);
+        s.execute("time.set", json!({"time": 2.0})).unwrap();
+        s.execute("edit.splitLayer", json!({"layers": [a]})).unwrap();
+        let after = f.content_of(&s.project, s.revision, comp);
+        assert_ne!(after, before);
+        let kept: Vec<i64> = (fr.frame_at(out) + 2..frames.len() as i64).collect();
+        assert_eq!(cached(after), kept, "the cut layer's frames (and one either side) render again; the rest stay");
+
+        s.execute("layer.setParent", json!({"layers": [b], "parent": a})).unwrap();
+        let parented = cache_all(&s);
+        s.execute("layer.timing", json!({"layers": [a], "out": 1})).unwrap();
+        assert_eq!(cached(f.content_of(&s.project, s.revision, comp)), Vec::<i64>::new(), "the trimmed layer's child moves everywhere");
+        assert_eq!(cached(parented).len(), frames.len(), "the earlier frames stay for undo");
     }
 
     #[test]
