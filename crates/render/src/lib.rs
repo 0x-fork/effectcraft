@@ -455,6 +455,12 @@ pub trait Accelerator: Send + Sync {
     fn auto_pick(&self) -> Option<&AutoPick> {
         None
     }
+    /// Whether the accelerator can still render frames. `false` once it has stopped for good
+    /// (its device was lost or retired): every frame it is asked for falls back to the CPU, so
+    /// callers that limit frames in flight for it can stop doing so.
+    fn available(&self) -> bool {
+        true
+    }
     /// Deferred readbacks: where a GPU readback cannot be waited for (WebGPU in a browser
     /// worker), a frame renders in *passes*. A readback the accelerator does not have yet is
     /// started, the step returns a cheap placeholder and the pass is marked missed
@@ -2094,7 +2100,7 @@ impl<'a> Renderer<'a> {
     /// applied).
     pub fn visible_layers(&self, ctx: &EvalCtx<'a>) -> Vec<&'a Layer> {
         let (comp, t) = (ctx.comp, ctx.time);
-        let any_solo = comp.layers.iter().any(|l| l.switches.solo && l.source.is_av() && l.is_active_at(t));
+        let any_solo = comp.layers.iter().any(|l| l.switches.solo && l.source.is_av());
         comp.layers
             .iter()
             .rev()
