@@ -280,8 +280,9 @@ fn cryptomatte(e: &mut Enc, ctx: &EffectCtx, b: GBuf, a: &AuxChannels) -> Option
     // cores with the rank planes resolved once.
     // The ID colours are only read by the Colors display; Matte, Preview and Matte Only need the
     // matte alone.
-    let colors = pr.e("display") == 0 && !pr.b("matteOnly");
-    let img = effectcraft_effects::crypto_aux_image_with(a, &layer, &sel, colors);
+    // `tests_fx_depth::cryptomatte_every_display_matches_the_cpu` guards this against the shader.
+    let what = effectcraft_effects::CryptoAux::for_display(pr.e("display"), pr.b("matteOnly"));
+    let img = effectcraft_effects::crypto_aux_image_with(a, &layer, &sel, what);
     let tex = e.g.upload_image(&img)?;
     let plane = lookup(e, &b, a, &tex, [0.5, 0.5], [0.0; 4]);
     let mut p = op(7);
