@@ -2048,7 +2048,8 @@ pub fn menu_bar(app: &mut EffectcraftApp, ui: &mut egui::Ui) {
                     .open_memory(cmd)
                     .show(|ui| {
                         ui.set_min_width(if label == "Effect" { 200.0 } else { 280.0 });
-                        crate::widgets::menu_scroll(ui, |ui| menu_nodes(app, ui, children, &mut clicked, &mut nav, 0));
+                        let browsing = nav.browsing();
+                        crate::widgets::menu_scroll(ui, browsing, |ui| menu_nodes(app, ui, children, &mut clicked, &mut nav, 0));
                     });
                 nav.top(&response);
                 // The titles and the open menus: a press inside them is not an outside press.
@@ -2155,7 +2156,7 @@ fn menu_nodes(
                 let browsing = nav.browsing();
                 let egui::InnerResponse { inner, response } = ui.menu_button((gutter(false), shown.as_str()), |ui| {
                     ui.set_min_width(if children.len() > 30 { 200.0 } else { 240.0 });
-                    crate::widgets::menu_scroll(ui, |ui| menu_nodes(app, ui, children, clicked, nav, depth + 1));
+                    crate::widgets::menu_scroll(ui, browsing, |ui| menu_nodes(app, ui, children, clicked, nav, depth + 1));
                 });
                 let response = browse_hover(nav, response);
                 nav.entry(ui, depth, &response, true);
