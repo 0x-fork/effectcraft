@@ -747,8 +747,8 @@ impl Frames {
         {
             return (*base_id, Some(base.clone()));
         }
-        // Only layers of this comp changed: its frames outside their span (a frame either side
-        // for motion blur) keep drawing the same pixels, so a cut or trim recaches only the
+        // Only layers of this comp changed: its frames outside their span (and a frame either
+        // side for rounding) keep drawing the same pixels, so a cut or trim recaches only the
         // layers it touched (#1641).
         if let Some((base_id, base)) = bases.get(&comp.0)
             && let (Some(old), Some(new)) = (base.comp(comp), project.comp(comp))
@@ -2058,6 +2058,61 @@ mod tests {
         assert_eq!(cached(parented).len(), frames.len(), "the earlier frames stay for undo");
     }
 
+    /// Every frame an edit keeps renders as a fresh render of the edited project does: Solo
+    /// hides the other layers at every frame, and a camera reaches the frames whose shutter
+    /// samples it (#1641 review).
+    #[test]
+    fn the_frames_an_edit_keeps_match_a_fresh_render() {
+        use effectcraft_engine::Session;
+        use effectcraft_engine::render::NoFootage;
+        use serde_json::json;
+        // Cache every frame of `comp`, run `edit`, check the frames kept against fresh renders.
+        fn kept(s: &mut Session, comp: ItemId, edit: serde_json::Value) -> Vec<i64> {
+            let (fr, n) = s.project.comp(comp).map(|c| (c.frame_rate, c.frame_rate.frame_at(c.duration))).unwrap();
+            let f = Frames::default();
+            let before = f.content_of(&s.project, s.revision, comp);
+            (0..n).for_each(|i| insert(&f, key(before, i, 0)));
+            let old = s.project.clone();
+            s.execute(edit["cmd"].as_str().unwrap(), edit["params"].clone()).unwrap();
+            let after = f.content_of(&s.project, s.revision, comp);
+            let kept: Vec<i64> = (0..n).filter(|&i| f.is_cached(&key(after, i, 0))).collect();
+            let render = |p, i| Renderer::new(p, &NoFootage, RenderOpts::default()).comp_frame(comp, fr.tick_of(i));
+            for &i in &kept {
+                assert_eq!(render(&old, i), render(&s.project, i), "kept frame {i} draws other pixels now");
+            }
+            kept
+        }
+        let id = |v: serde_json::Value, k: &str| v[k].as_u64().unwrap();
+        let mut s = Session::default();
+
+        // Solo on a 2–3 s layer hides the 10 s underlay everywhere; turning it off shows it again.
+        let comp = ItemId(id(s.execute("comp.new", json!({"name": "Solo", "width": 8, "height": 8, "duration": 10})).unwrap(), "comp"));
+        s.execute("layer.newSolid", json!({"comp": comp.0, "color": "#ff0000"})).unwrap();
+        let short = id(s.execute("layer.newSolid", json!({"comp": comp.0, "color": "#00ff00"})).unwrap(), "layer");
+        s.execute("layer.timing", json!({"layers": [short], "in": 2, "out": 3})).unwrap();
+        let solo = |on: bool| json!({"cmd": "layer.setSwitch", "params": {"layers": [short], "switch": "solo", "value": on}});
+        assert_eq!(kept(&mut s, comp, solo(true)), Vec::<i64>::new());
+        assert_eq!(kept(&mut s, comp, solo(false)), Vec::<i64>::new());
+
+        // A 2–3 s camera over a 4 s motion-blurred 3D layer, shutter 720° at phase 360°: a frame
+        // samples 1 to 3 frames ahead, so moving the camera reaches the 3 frames before it.
+        let comp = ItemId(id(
+            s.execute("comp.new", json!({"name": "Cam", "width": 16, "height": 16, "duration": 4, "frameRate": 30, "shutterAngle": 720, "shutterPhase": 360}))
+                .unwrap(),
+            "comp",
+        ));
+        let plane = id(s.execute("layer.newSolid", json!({"comp": comp.0, "color": "#ff0000"})).unwrap(), "layer");
+        for sw in ["threeD", "motionBlur"] {
+            s.execute("layer.setSwitch", json!({"layers": [plane], "switch": sw, "value": true})).unwrap();
+        }
+        let cam = id(s.execute("layer.newCamera", json!({"comp": comp.0})).unwrap(), "layer");
+        s.execute("layer.timing", json!({"layers": [cam], "in": 2, "out": 3})).unwrap();
+        let moved =
+            kept(&mut s, comp, json!({"cmd": "prop.set", "params": {"comp": comp.0, "layer": cam, "path": "transform/position", "value": [40, 8, -30]}}));
+        assert!(moved.contains(&0) && moved.contains(&100), "frames far from the camera stay: {moved:?}");
+        assert!(!(56..=91).any(|f| moved.contains(&f)), "frames whose shutter samples the camera render again: {moved:?}");
+    }
+
     #[test]
     fn short_solid_additions_and_removals_keep_unaffected_frames() {
         use effectcraft_engine::Session;
@@ -2071,11 +2126,12 @@ mod tests {
             (0..600).for_each(|n| insert(&f, key(content, n, 0)));
         };
         let cached = |s: &Session| f.cached_frames(&key(f.content_of(&s.project, s.revision, comp), 0, 0));
-        let kept: Vec<i64> = (0..=58).chain(92..600).collect();
+        // 2–3 s, a quarter frame of the default shutter and a frame of rounding either side.
+        let kept: Vec<i64> = (0..=57).chain(92..600).collect();
         cache_all(&s);
         let solid = s.execute("layer.newSolid", json!({"color": "#00ff00"})).unwrap()["layer"].as_u64().unwrap();
         s.execute("layer.timing", json!({"layers": [solid], "in": 2, "out": 3})).unwrap();
-        assert_eq!(cached(&s), kept, "adding a source invalidates only frames 59..=91");
+        assert_eq!(cached(&s), kept, "adding a source invalidates only frames 58..=91");
         cache_all(&s);
         s.execute("edit.undo", json!({})).unwrap();
         s.execute("edit.undo", json!({})).unwrap();

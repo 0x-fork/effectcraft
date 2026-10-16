@@ -898,11 +898,11 @@ impl Comp {
             && *essential == o.essential
     }
 
-    /// The comp-time span (`in_point..out_point` of every layer changed, added or removed)
-    /// outside which `self` draws the same pixels as `o`, so cached frames there stay valid
-    /// (#1641). `None` when the edit can reach any frame: a comp setting, a layer reorder, an
-    /// expression (it reads anything), or a changed layer another layer parents to, mattes
-    /// with or picks in an effect.
+    /// The comp-time span (`in_point..out_point` of every layer changed, added or removed,
+    /// widened by the shutter) outside which `self` draws the same pixels as `o`, so cached
+    /// frames there stay valid (#1641). `None` when the edit can reach any frame: a comp setting,
+    /// a layer reorder, Solo turning on or off, an expression (it reads anything), or a changed
+    /// layer another layer parents to, mattes with or picks in an effect.
     pub fn changed_span(&self, o: &Comp) -> Option<(Tick, Tick)> {
         fn reads(g: &PropGroup, changed: &[LayerId]) -> bool {
             g.children.iter().any(|c| match c {
@@ -915,7 +915,8 @@ impl Comp {
                 Node::Group(g) => reads(g, changed),
             })
         }
-        if !self.same_settings(o) {
+        // Solo hides every other layer at every frame.
+        if !self.same_settings(o) || self.any_solo() != o.any_solo() {
             return None;
         }
         let common = |a: &Comp, b: &Comp| a.layers.iter().map(|l| l.id).filter(|id| b.layer(*id).is_some()).collect::<Vec<_>>();
@@ -939,7 +940,17 @@ impl Comp {
         if self.layers.iter().chain(&o.layers).any(reaches) {
             return None;
         }
-        span
+        // A frame at `t` samples cameras, lights and transforms over its shutter,
+        // `t + (phase + angle * 0..=1) / 360` frames, and draws the layers active at `t` itself.
+        let (a, p) = (self.shutter_angle / 360.0, self.shutter_phase / 360.0);
+        let fd = self.frame_duration().seconds();
+        let (before, after) = (Tick::from_seconds_f64(p.max(p + a).max(0.0) * fd), Tick::from_seconds_f64(-p.min(p + a).min(0.0) * fd));
+        span.map(|(s, e)| (s - before, e + after))
+    }
+
+    /// Some layer is soloed: only the soloed layers draw.
+    pub fn any_solo(&self) -> bool {
+        self.layers.iter().any(|l| l.switches.solo && l.source.is_av())
     }
 
     /// Draws the same pixels as `o` once plain markers are ignored: they change no pixels. Protected
