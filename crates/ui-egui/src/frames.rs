@@ -301,7 +301,7 @@ fn content_key(keys: &ContentKeys, project: &Project, revision: u64, comp: u64) 
 /// hands out), and by value the project settings and the footage, solids and proxies it uses.
 /// With expressions in its comps (which can read anything) every item counts.
 pub fn comp_content(project: &Project, comp: ItemId) -> u64 {
-    comp_content_with(project, comp, |_, c| Arc::as_ptr(c))
+    comp_content_with(project, comp, project, |_, c| c)
 }
 
 /// Whether two versions of a comp draw the same pixels. Markers only count when an expression
@@ -321,8 +321,9 @@ fn project_has_expressions(project: &Project) -> bool {
     project.items.values().any(|i| matches!(&i.kind, ItemKind::Comp(c) if c.layers.iter().any(|l| has_expression(&l.props))))
 }
 
-/// [`comp_content`] with each comp's address given by `addr`.
-fn comp_content_with(project: &Project, comp: ItemId, addr: impl Fn(ItemId, &Arc<Comp>) -> *const Comp) -> u64 {
+/// [`comp_content`] with each comp's version selected for both its sources and its address.
+/// Sources removed by undo are read from `base`.
+fn comp_content_with<'a>(project: &'a Project, comp: ItemId, base: &'a Project, version: impl Fn(ItemId, &'a Arc<Comp>) -> &'a Arc<Comp>) -> u64 {
     use std::hash::{Hash, Hasher};
     fn has_expression(g: &PropGroup) -> bool {
         g.children.iter().any(|c| match c {
@@ -332,6 +333,7 @@ fn comp_content_with(project: &Project, comp: ItemId, addr: impl Fn(ItemId, &Arc
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
     format!("{:?}", project.settings).hash(&mut h);
+    let item = |id| project.item(id).or_else(|| base.item(id));
     let mut seen = BTreeSet::new();
     let mut stack = vec![comp];
     let mut expressions = false;
@@ -339,7 +341,8 @@ fn comp_content_with(project: &Project, comp: ItemId, addr: impl Fn(ItemId, &Arc
         if !seen.insert(id) {
             continue;
         }
-        let Some(ItemKind::Comp(c)) = project.item(id).map(|i| &i.kind) else { continue };
+        let Some(ItemKind::Comp(c)) = item(id).map(|i| &i.kind) else { continue };
+        let c = version(id, c);
         for l in &c.layers {
             if let LayerSource::Comp { item } | LayerSource::Footage { item } | LayerSource::Solid { item } = l.source {
                 stack.push(item);
@@ -349,14 +352,14 @@ fn comp_content_with(project: &Project, comp: ItemId, addr: impl Fn(ItemId, &Arc
     }
     let ids: Vec<ItemId> = if expressions { project.items.keys().copied().collect() } else { seen.into_iter().collect() };
     for id in ids {
-        let Some(it) = project.item(id) else { continue };
+        let Some(it) = item(id) else { continue };
         id.0.hash(&mut h);
         if expressions {
             // (`comp("Name")`, `footage("Name")`)
             it.name.hash(&mut h);
         }
         match &it.kind {
-            ItemKind::Comp(c) => (addr(id, c) as usize).hash(&mut h),
+            ItemKind::Comp(c) => (Arc::as_ptr(version(id, c)) as usize).hash(&mut h),
             k => format!("{k:?}").hash(&mut h),
         }
         format!("{:?}", it.proxy).hash(&mut h);
@@ -737,9 +740,9 @@ impl Frames {
         let markers_count = project_has_expressions(project);
         if let Some((base_id, base)) = bases.get(&comp.0)
             && *base_id != plain
-            && comp_content_with(project, comp, |id, c| match base.item(id).map(|i| &i.kind) {
-                Some(ItemKind::Comp(b)) if Arc::ptr_eq(b, c) || same_pixels(b, c, markers_count) => Arc::as_ptr(b),
-                _ => Arc::as_ptr(c),
+            && comp_content_with(project, comp, project, |id, c| match base.item(id).map(|i| &i.kind) {
+                Some(ItemKind::Comp(b)) if Arc::ptr_eq(b, c) || same_pixels(b, c, markers_count) => b,
+                _ => c,
             }) == *base_id
         {
             return (*base_id, Some(base.clone()));
@@ -749,9 +752,9 @@ impl Frames {
         // layers it touched (#1641).
         if let Some((base_id, base)) = bases.get(&comp.0)
             && let (Some(old), Some(new)) = (base.comp(comp), project.comp(comp))
-            && comp_content_with(project, comp, |id, c| match base.item(id).map(|i| &i.kind) {
-                Some(ItemKind::Comp(b)) if id == comp || Arc::ptr_eq(b, c) || same_pixels(b, c, markers_count) => Arc::as_ptr(b),
-                _ => Arc::as_ptr(c),
+            && comp_content_with(project, comp, base, |id, c| match base.item(id).map(|i| &i.kind) {
+                Some(ItemKind::Comp(b)) if id == comp || Arc::ptr_eq(b, c) || same_pixels(b, c, markers_count) => b,
+                _ => c,
             }) == *base_id
             && let Some((s, e)) = new.changed_span(old)
             && let Ok(mut cache) = self.cache.lock()
@@ -2053,6 +2056,63 @@ mod tests {
         s.execute("layer.timing", json!({"layers": [a], "out": 1})).unwrap();
         assert_eq!(cached(f.content_of(&s.project, s.revision, comp)), Vec::<i64>::new(), "the trimmed layer's child moves everywhere");
         assert_eq!(cached(parented).len(), frames.len(), "the earlier frames stay for undo");
+    }
+
+    #[test]
+    fn short_solid_additions_and_removals_keep_unaffected_frames() {
+        use effectcraft_engine::Session;
+        use serde_json::json;
+        let mut s = Session::default();
+        let comp = ItemId(s.execute("comp.new", json!({"width": 8, "height": 8, "frameRate": 30, "duration": 20})).unwrap()["comp"].as_u64().unwrap());
+        s.execute("layer.newSolid", json!({"color": "#ff0000"})).unwrap();
+        let f = Frames::default();
+        let cache_all = |s: &Session| {
+            let content = f.content_of(&s.project, s.revision, comp);
+            (0..600).for_each(|n| insert(&f, key(content, n, 0)));
+        };
+        let cached = |s: &Session| f.cached_frames(&key(f.content_of(&s.project, s.revision, comp), 0, 0));
+        let kept: Vec<i64> = (0..=58).chain(92..600).collect();
+        cache_all(&s);
+        let solid = s.execute("layer.newSolid", json!({"color": "#00ff00"})).unwrap()["layer"].as_u64().unwrap();
+        s.execute("layer.timing", json!({"layers": [solid], "in": 2, "out": 3})).unwrap();
+        assert_eq!(cached(&s), kept, "adding a source invalidates only frames 59..=91");
+        cache_all(&s);
+        s.execute("edit.undo", json!({})).unwrap();
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(cached(&s), (0..600).collect::<Vec<_>>(), "undoing the addition restores every frame");
+        s.execute("edit.redo", json!({})).unwrap();
+        s.execute("edit.redo", json!({})).unwrap();
+        assert_eq!(cached(&s), (0..600).collect::<Vec<_>>(), "redoing the addition restores every frame");
+        s.execute("edit.clear", json!({"layers": [solid]})).unwrap();
+        assert_eq!(cached(&s), kept, "removing its layer invalidates the same span");
+    }
+
+    #[test]
+    fn adding_a_source_does_not_hide_changes_to_existing_dependencies() {
+        use effectcraft_engine::Session;
+        use serde_json::json;
+        for (command, params) in [
+            ("layer.settings", json!({"comp": "Outer", "layer": "Underlay", "color": "#0000ff"})),
+            ("prop.set", json!({"comp": "Inner", "layer": "Inner solid", "path": "transform/opacity", "value": 40})),
+        ] {
+            let mut s = Session::default();
+            let comp = ItemId(
+                s.execute("comp.new", json!({"name": "Outer", "width": 8, "height": 8, "frameRate": 30, "duration": 20})).unwrap()["comp"].as_u64().unwrap(),
+            );
+            s.execute("layer.newSolid", json!({"name": "Underlay", "color": "#ff0000"})).unwrap();
+            s.execute("comp.new", json!({"name": "Inner", "width": 8, "height": 8, "duration": 20})).unwrap();
+            s.execute("layer.newSolid", json!({"name": "Inner solid", "color": "#00ff00"})).unwrap();
+            s.execute("comp.open", json!({"comp": "Outer"})).unwrap();
+            s.execute("layer.addItem", json!({"item": "Inner"})).unwrap();
+            let f = Frames::default();
+            let before = f.content_of(&s.project, s.revision, comp);
+            (0..600).for_each(|n| insert(&f, key(before, n, 0)));
+            s.execute(command, params).unwrap();
+            let solid = s.execute("layer.newSolid", json!({"color": "#ffffff"})).unwrap()["layer"].as_u64().unwrap();
+            s.execute("layer.timing", json!({"layers": [solid], "in": 2, "out": 3})).unwrap();
+            let after = f.content_of(&s.project, s.revision, comp);
+            assert!(f.cached_frames(&key(after, 0, 0)).is_empty(), "{command} changes pixels outside the added layer");
+        }
     }
 
     #[test]
