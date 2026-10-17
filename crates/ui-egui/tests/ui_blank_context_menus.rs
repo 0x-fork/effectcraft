@@ -274,6 +274,31 @@ fn timeline_layer_context_menu_has_the_effects_submenu_and_applies_an_effect() {
     assert_eq!(names, ["Gaussian Blur"]);
 }
 
+/// #1611: the layer context menu has Layer Styles between Blending Mode and Effects.
+#[test]
+fn timeline_layer_context_menu_has_layer_styles_submenu() {
+    let mut h = harness();
+    let solid = h.state_mut().session.execute("layer.newSolid", json!({"name": "Solid", "color": "#406080"})).unwrap()["layer"].as_u64().unwrap();
+    h.run_steps(3);
+    let r = rect(&h, &format!("timeline.layer.{solid}.row"));
+    right_click(&mut h, pos2(r.min.x + 210.0, r.center().y));
+    let blending = h.get_by_label("Blending Mode ⏵").rect();
+    let styles = h.get_by_label("Layer Styles ⏵").rect();
+    let effects = h.get_by_label("Effects ⏵").rect();
+    assert!(blending.bottom() <= styles.top() && styles.bottom() <= effects.top(), "Layer Styles between Blending Mode and Effects");
+    h.get_by_label("Layer Styles ⏵").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Layer Style Options...").is_some());
+    assert!(h.query_by_label("Drop Shadow").is_some());
+    assert!(h.query_by_label("Stroke").is_some());
+    h.get_by_label("Drop Shadow").click();
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, Some(Dialog::LayerStyles));
+    let comp = h.state().session.active_comp().unwrap();
+    let l = comp.layer(effectcraft_engine::project::LayerId(solid)).unwrap();
+    assert!(l.layer_styles().is_some_and(|g| g.sub("dropShadow").is_some()));
+}
+
 /// #976: a layer's context menu has After Effects' Markers ▸ Add Marker, which marks the layer that
 /// was right-clicked (not the one selected before, and not the composition) at the current time.
 #[test]

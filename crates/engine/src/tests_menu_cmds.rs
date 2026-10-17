@@ -111,6 +111,38 @@ fn set_switch_others() {
     assert!(s.execute("layer.setSwitch", json!({"layers": [c], "switch": "nope", "others": true})).is_err());
 }
 
+/// A null's Video switch (the eye) works like any layer's, as in After Effects: it toggles,
+/// Alt-click and Hide Other Video take nulls along, and its children still follow it while it is
+/// hidden (parenting ignores the eye).
+#[test]
+fn null_video_switch() {
+    let mut s = comp();
+    let a = solid(&mut s, "#ff0000");
+    let n = s.execute("layer.newNull", json!({})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("layer.setSwitch", json!({"layers": [n], "switch": "video"})).unwrap();
+    assert!(!layer(&s, n).switches.video);
+    s.execute("edit.undo", json!({})).unwrap();
+    assert!(layer(&s, n).switches.video);
+    // Alt-click on the solid's eye hides the null too; on the null's, the solid.
+    s.execute("layer.setSwitch", json!({"layers": [a], "switch": "video", "others": true})).unwrap();
+    assert!(layer(&s, a).switches.video && !layer(&s, n).switches.video);
+    s.execute("layer.setSwitch", json!({"layers": [n], "switch": "video", "others": true})).unwrap();
+    assert!(!layer(&s, a).switches.video && layer(&s, n).switches.video);
+    s.execute("layer.showAllVideo", json!({})).unwrap();
+    s.execute("layer.hideOtherVideo", json!({"layers": [a]})).unwrap();
+    assert!(layer(&s, a).switches.video && !layer(&s, n).switches.video);
+    // The hidden null still carries its child.
+    s.execute("layer.setParent", json!({"layers": [a], "parent": n})).unwrap();
+    s.execute("prop.set", json!({"layer": n, "path": "transform/position", "value": [420, 180, 0]})).unwrap();
+    let cid = s.active_comp_id().unwrap();
+    let c = s.project.comp(cid).unwrap().clone();
+    let ctx = effectcraft_render::EvalCtx::new(&s.project, cid, &c, Tick::ZERO);
+    let child = c.layer(effectcraft_project::LayerId(a)).unwrap();
+    let (m, _) = ctx.layer_to_comp(child);
+    let centre = m.apply(effectcraft_geom::vec2(100.0, 50.0));
+    assert!((centre.x - 420.0).abs() < 1e-6 && (centre.y - 180.0).abs() < 1e-6, "{centre:?}");
+}
+
 #[test]
 fn layer_switches_menu() {
     let mut s = comp();

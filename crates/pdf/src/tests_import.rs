@@ -274,9 +274,30 @@ fn inline_image_with_absurd_dimensions_falls_back_to_ei_scan() {
     assert!(!doc.skipped.is_empty());
     // A length just under `usize::MAX` passes the row math; past byte 4096 of the content the
     // caller's `start + len` would then overflow.
-    let content = format!("{}q 10 0 0 10 0 0 cm BI /W 2305843009213693440 /H 8 /CS /G /BPC 8 ID   EI Q", " ".repeat(5000));
+    let content = format!("{}q 10 0 0 10 0 0 cm BI /W 2305843009213693440 /H 8 /CS /G /BPC 8 ID \0 EI Q", " ".repeat(5000));
     let doc = parse(&page_pdf(&content, "", vec![])).unwrap();
     let _ = render(&doc);
+}
+
+#[test]
+fn smask_with_absurd_bpc_is_ignored_not_fatal() {
+    // `/BitsPerComponent 32` in a soft mask: `1u32 << bpc` must neither panic (debug)
+    // nor mistranslate samples into alpha (release); the mask is treated as absent.
+    let bytes = page_pdf(
+        "q 2 0 0 2 0 0 cm /Im Do Q",
+        "/XObject << /Im 10 0 R >>",
+        vec![
+            (
+                10,
+                "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 /SMask 11 0 R >>".into(),
+                Some(vec![0x80; 4]),
+            ),
+            (11, "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 32 >>".into(), Some(vec![0xFF; 16])),
+        ],
+    );
+    let doc = parse(&bytes).unwrap();
+    let img = render(&doc);
+    assert!(coverage(&img, 0, 0, 200, 100) > 0.0, "image still draws, opaque");
 }
 
 #[test]

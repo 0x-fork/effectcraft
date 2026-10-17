@@ -184,6 +184,11 @@ fn mask_image(file: &File, o: &Obj, soft: bool) -> Option<(Vec<u8>, usize, usize
         return Some((data.into_iter().step_by(jpeg_n.unwrap_or(1)).take(w * h).collect(), w, h));
     }
     let bpc = if soft { file.get_num(d, "BitsPerComponent").unwrap_or(8.0) as usize } else { 1 };
+    // Like `decode()`: only 1/2/4/8/16-bit depths are supported. Anything else (notably
+    // `bpc >= 32`, where `1u32 << bpc` below would overflow) means "no usable mask".
+    if !matches!(bpc, 1 | 2 | 4 | 8 | 16) {
+        return None;
+    }
     let max = ((1u32 << bpc) - 1).max(1) as f64;
     let dec = file.get(d, "Decode").map(|x| file.nums(x)).filter(|v| v.len() >= 2);
     let v = unpack(&data, w, h, 1, bpc);

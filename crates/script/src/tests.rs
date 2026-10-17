@@ -442,6 +442,32 @@ fn save_frame_to_png_writes_behind_the_file_gate() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #1246: with Warn User When Executing Files on, a script that asserts `confirmed` itself still
+/// gets the question; only the user's answer opens the file.
+#[test]
+fn a_script_cannot_confirm_executing_a_file_for_itself() {
+    let dir = std::env::temp_dir().join(format!("ec-script-exec-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("run.txt");
+    std::fs::write(&f, "x").unwrap();
+    let q = serde_json::to_string(&f.to_string_lossy()).unwrap();
+    let mut s = session();
+    // The user allows file access; the warning stays on (the default).
+    s.execute("prefs.set", json!({"key": "scripting.allowScriptsWriteFiles", "value": true})).unwrap();
+    s.drain_events();
+    let opened = |s: &mut Session| s.drain_events().iter().any(|e| matches!(e, effectcraft_engine::Event::OpenUrl(_)));
+    for code in [
+        format!("JSON.stringify(app.run('file.executeFile', {{path: {q}, confirmed: true}}))"),
+        format!("JSON.stringify(app.run('engine.batch', {{steps: [{{command: 'file.executeFile', params: {{path: {q}, confirmed: true}}}}]}}))"),
+        format!("new File({q}).execute()"),
+    ] {
+        let o = ok(&mut s, &code);
+        assert!(!o.result.to_string().contains("opened") || o.result == json!(false), "{code}: {:?}", o.result);
+        assert!(!opened(&mut s), "{code} opened the file without asking");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #590: a script can't give itself file and network access (or turn off the warning before
 /// executing files) by changing Settings ▸ Scripting & Expressions; the user still can.
 #[test]
@@ -1268,6 +1294,36 @@ fn effect_parameter_interpolation_and_ease() {
         "#,
     );
     assert_eq!(o.result, json!([true, true, 16.67, 33.33, true]));
+}
+
+/// #1531: the per-key methods act on a comp that isn't the active one too. Activating the keys'
+/// comp brought back its own (empty) key selection over the keys named, so the interpolation and
+/// the ease were silently dropped once another comp with a layer had been made first.
+#[test]
+fn key_interpolation_and_ease_apply_outside_the_active_comp() {
+    let mut s = session();
+    let o = ok(
+        &mut s,
+        r#"
+        var a = app.project.items.addComp("A", 400, 400, 1, 10, 20); a.layers.addNull();
+        var c = app.project.items.addComp("C", 400, 400, 1, 10, 20);
+        var n = c.layers.addNull(); n.threeDLayer = true;
+        var p = n.property("ADBE Transform Group").property("ADBE Rotate Y");
+        p.setValueAtTime(1, 0); p.setValueAtTime(2, -178);
+        for (var j = 1; j <= 2; j++) {
+          p.setInterpolationTypeAtKey(j, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
+          p.setTemporalEaseAtKey(j, [new KeyframeEase(0, 60)], [new KeyframeEase(0, 60)]);
+        }
+        [p.keyOutInterpolationType(1) == KeyframeInterpolationType.BEZIER,
+         p.keyInInterpolationType(2) == KeyframeInterpolationType.BEZIER,
+         p.keyOutTemporalEase(1)[0].influence,
+         Math.round(p.valueAtTime(1.25, false) * 100) / 100]
+        "#,
+    );
+    let v = o.result;
+    assert_eq!((&v[0], &v[1], &v[2]), (&json!(true), &json!(true), &json!(60)), "{v}");
+    // Eased, not the linear -44.5.
+    assert!(v[3].as_f64().is_some_and(|x| (x - -44.5).abs() > 1.0), "{v}");
 }
 
 /// #808: sourcePointToComp and compPointToSource follow the layer's transform.
