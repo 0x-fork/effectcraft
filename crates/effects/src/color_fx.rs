@@ -1011,11 +1011,13 @@ pub fn specs() -> Vec<EffectSpec> {
             "Exposure",
             {
                 let mut v = vec![p("channels", "Channels", Value::Enum(0), popup(&["Master", "Individual Channels"]))];
+                // After Effects' ranges (valid, slider, decimals). Gamma values below 0.1 from
+                // older projects or Photoshop imports (0.01..9.99) are kept and still render.
                 let group = |ids: [&'static str; 3]| {
                     [
-                        p(ids[0], "Exposure", num(0.0), slider(-20.0, 20.0, -5.0, 5.0, 2)),
+                        p(ids[0], "Exposure", num(0.0), slider(-100.0, 100.0, -4.0, 4.0, 2)),
                         p(ids[1], "Offset", num(0.0), slider(-2.0, 2.0, -0.5, 0.5, 4)),
-                        p(ids[2], "Gamma Correction", num(1.0), slider(0.01, 9.99, 0.1, 3.0, 2)),
+                        p(ids[2], "Gamma Correction", num(1.0), slider(0.1, 10.0, 0.1, 10.0, 2)),
                     ]
                 };
                 v.extend(group(["master/exposure", "master/offset", "master/gamma"]));
@@ -1415,6 +1417,38 @@ mod tests {
             [0.25, 0.25, 0.25, 1.0],
         );
         assert!((neg[0] + 0.5).abs() < 1e-4, "{neg:?}");
+    }
+
+    /// After Effects' Exposure ranges for all twelve sliders; a saved value outside them (a gamma
+    /// of 0.05, valid before, as in Photoshop) survives loading and still renders.
+    #[test]
+    fn exposure_has_after_effects_ranges_and_keeps_old_values() {
+        use effectcraft_project::build::Ids;
+        let spec = crate::find("ec.color.exposure").unwrap();
+        let want = [(-100.0, 100.0, -4.0, 4.0, 2), (-2.0, 2.0, -0.5, 0.5, 4), (0.1, 10.0, 0.1, 10.0, 2)];
+        let sliders: Vec<_> = spec
+            .params
+            .iter()
+            .filter_map(|p| match p.ui {
+                ParamUi::Slider { min, max, slider_min, slider_max, decimals } => Some((p.id, (min, max, slider_min, slider_max, decimals))),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sliders.len(), 12);
+        for (i, (id, r)) in sliders.iter().enumerate() {
+            assert_eq!(*r, want[i % 3], "{id}");
+        }
+        let mut next = 1;
+        let mut g = crate::instantiate(spec, &mut Ids(&mut next), spec.name, [10.0, 10.0]);
+        let gamma = g.prop_mut("master/gamma").unwrap();
+        gamma.value = num(0.05);
+        gamma.ui = slider(0.01, 9.99, 0.1, 3.0, 2);
+        crate::migrate::upgrade_instance(spec, &mut g, &mut Ids(&mut next), [10.0, 10.0]);
+        let gamma = g.prop_mut("master/gamma").unwrap();
+        assert_eq!(gamma.value, num(0.05));
+        assert!(matches!(gamma.ui, ParamUi::Slider { min, .. } if min == 0.1));
+        let o = px("ec.color.exposure", &[("master/gamma", num(0.05)), ("bypassLinearLight", Value::Bool(true))], [0.5, 0.5, 0.5, 1.0]);
+        assert!((o[0] - 0.5f32.powf(20.0)).abs() < 1e-9, "{o:?}");
     }
 
     /// Exposure on a red [1, 0, 0] solid against After Effects 2026 renders (sRGB working space,

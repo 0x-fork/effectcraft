@@ -68,6 +68,7 @@ the GPU is performance, not parity.
 | 2026-10-19 | minor | Black & White's Tint keeps the gray's luminosity (Color blend), measured against After Effects 2026 renders (CPU and GPU) |
 | 2026-10-18 | minor | Tint uses Rec. 601 luminance weights, measured against After Effects 2026 renders of red, green, blue and grey solids (CPU and GPU) |
 | 2026-10-18 | minor | Exposure converts to linear light with a pure 2.2 power curve, as measured in After Effects (Offset 0.0005 / 0.002 / 0.02 / 0.1 on black: 8 / 15 / 43 / 90), not the piecewise sRGB curve |
+| 2026-10-18 | minor | Exposure converts to linear light with a pure 2.2 power curve, as measured in After Effects (Offset 0.0005 / 0.002 / 0.02 / 0.1 on black: 8 / 15 / 43 / 90), not the piecewise sRGB curve; its sliders take After Effects' ranges (Exposure −100..100, slider −4..4; Offset −2..2, slider −0.5..0.5; Gamma Correction 0.1..10) |
 | 2026-10-12 | minor | Parameters 3,014 to 3,017 (effects.md); #303, #514, #526, #533–#536 marked closed instead of pending |
 | 2026-10-12 | minor | Effect colour labels (26.5) added in Effect Controls |
 | 2026-10-12 | minor | Tint's Swap Colors button and agent-drivable command (#963); undo/redo, instance targeting, animated layer-time edits and invalid-input tests |
