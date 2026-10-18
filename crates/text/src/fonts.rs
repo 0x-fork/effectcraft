@@ -542,6 +542,8 @@ enum FallbackScript {
     /// Sinhala (one family covers them all on Windows; elsewhere each has its own).
     Indic,
     Thai,
+    /// Georgian: Mkhedruli, Asomtavruli and Nuskhuri, and Mtavruli capitals.
+    Georgian,
     Other,
 }
 
@@ -570,6 +572,7 @@ fn script_of(c: char) -> FallbackScript {
         0x0590..=0x05FF | 0xFB1D..=0xFB4F => FallbackScript::Hebrew,
         0x0900..=0x0DFF | 0xA8E0..=0xA8FF => FallbackScript::Indic,
         0x0E00..=0x0E7F => FallbackScript::Thai,
+        0x10A0..=0x10FF | 0x1C90..=0x1CBF | 0x2D00..=0x2D2F => FallbackScript::Georgian,
         _ => FallbackScript::Other,
     }
 }
@@ -635,6 +638,7 @@ const INDIC_FAMILIES: &[&str] = &[
     "Noto Sans Sinhala",
 ];
 const THAI_FAMILIES: &[&str] = &["Leelawadee UI", "Tahoma", "Thonburi", "Noto Sans Thai", "Noto Sans Thai UI", "Loma", "Garuda"];
+const GEORGIAN_FAMILIES: &[&str] = &["Sylfaen", ".SF Georgian", "SF Georgian", "Noto Sans Georgian", "DejaVu Sans"];
 
 /// The CJK locale the host asked fallbacks to prefer, when it has one (see [`set_cjk_locale`]).
 static REQUESTED_CJK_LOCALE: RwLock<Option<String>> = RwLock::new(None);
@@ -719,6 +723,7 @@ fn families_for(s: FallbackScript) -> &'static [&'static str] {
         FallbackScript::Hebrew => HEBREW_FAMILIES,
         FallbackScript::Indic => INDIC_FAMILIES,
         FallbackScript::Thai => THAI_FAMILIES,
+        FallbackScript::Georgian => GEORGIAN_FAMILIES,
         FallbackScript::Other => &[],
     }
 }
@@ -981,6 +986,8 @@ mod tests {
         assert_eq!(script_of('क'), FallbackScript::Indic);
         assert_eq!(script_of('த'), FallbackScript::Indic);
         assert_eq!(script_of('ก'), FallbackScript::Thai);
+        assert_eq!(script_of('ა'), FallbackScript::Georgian);
+        assert_eq!(script_of('\u{1c90}'), FallbackScript::Georgian, "Mtavruli");
         assert_eq!(script_of('\u{feff}'), FallbackScript::Other, "the byte order mark is no Arabic letter");
     }
 
@@ -1002,6 +1009,22 @@ mod tests {
             assert!(f.has_char(c), "{c}: {} lacks it", f.info.family);
             assert!(families.iter().any(|n| f.info.family.eq_ignore_ascii_case(n)), "{c} → {}", f.info.family);
         }
+    }
+
+    /// Native: the script search picks a Georgian family for Mkhedruli (a face already loaded
+    /// that happens to cover it, such as macOS Helvetica, still wins in `fallback_for`). Skipped
+    /// where no family from the list is installed.
+    #[test]
+    fn georgian_falls_back_to_a_georgian_system_family() {
+        scan_system();
+        let c = 'ა';
+        if !GEORGIAN_FAMILIES.iter().any(|n| resolve_in(n, "Regular").is_some_and(|r| face(r.face).has_char(c))) {
+            eprintln!("no Georgian family from the list is installed; skipping");
+            return;
+        }
+        let f = face(system_fallback(c, "Regular").unwrap());
+        assert!(f.has_char(c), "{} lacks it", f.info.family);
+        assert!(GEORGIAN_FAMILIES.iter().any(|n| f.info.family.eq_ignore_ascii_case(n)), "{c} → {}", f.info.family);
     }
 
     /// Native: Japanese text in a Latin-only family falls back to an installed Japanese family
