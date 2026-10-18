@@ -714,14 +714,15 @@ fn pointwise(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let c = straight(px);
                 var o = vec3<f32>(0.0);
                 for (var i = 0; i < 3; i++) {
-                    // Per-channel gain, offset, gamma; negative values are mirrored.
+                    // Per-channel gain, offset, gamma; negative values are mirrored. The
+                    // linear-light conversion is a pure 2.2 power (effects crate exposure).
                     if (P.u[0].y != 0u) {
                         let x = c[i] * P.f[0][i] + P.f[1][i];
                         o[i] = sign(x) * powz(abs(x), 1.0 / P.f[2][i]);
                     } else {
-                        let lin = srgb_to_linear(max(c[i], 0.0));
+                        let lin = sign(c[i]) * powz(abs(c[i]), 2.2);
                         let x = lin * P.f[0][i] + P.f[1][i];
-                        o[i] = sign(x) * linear_to_srgb(powz(abs(x), 1.0 / P.f[2][i]));
+                        o[i] = sign(x) * powz(powz(abs(x), 1.0 / P.f[2][i]), 1.0 / 2.2);
                     }
                 }
                 px = vec4<f32>(o * a, a);

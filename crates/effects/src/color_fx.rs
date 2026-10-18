@@ -314,6 +314,17 @@ pub fn exposure_settings(ctx: &EffectCtx) -> [(f32, f32, f32); 3] {
     }
 }
 
+/// The power curve Exposure's own linear-light conversion uses (Bypass Linear Light Conversion
+/// off). After Effects decodes with a pure 2.2 power, not the piecewise sRGB curve: Offset 0.0005
+/// on black measures 8/255 there, which 2.2 predicts (8.06) and sRGB does not (1.65).
+pub const EXPOSURE_LINEAR_GAMMA: f32 = 2.2;
+
+/// Exposure: per channel, `(value · 2^exposure + offset)^(1 / gamma)`, in linear light unless
+/// Bypass Linear Light Conversion is on. The conversion is the effect's own pure 2.2 power curve
+/// (see [`EXPOSURE_LINEAR_GAMMA`]), applied whatever the project's working space, also when it
+/// is already linear (Linearize Working Space), as before. Negative values (32 bpc, or a
+/// negative Offset) go through the curves mirrored, so a negative Offset darkens smoothly past
+/// black and the default settings leave every value unchanged.
 fn exposure(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let s = exposure_settings(ctx);
     let bypass = ctx.params.b("bypassLinearLight");
@@ -323,9 +334,9 @@ fn exposure(ctx: &EffectCtx, mut b: Buf) -> Buf {
             if bypass {
                 return mirror_pow(c[i] * e + off, 1.0 / g);
             }
-            let lin = effectcraft_color::srgb_to_linear(c[i].max(0.0));
+            let lin = mirror_pow(c[i], EXPOSURE_LINEAR_GAMMA);
             let o = mirror_pow(lin * e + off, 1.0 / g);
-            effectcraft_color::linear_to_srgb(o.abs()).copysign(o)
+            mirror_pow(o, 1.0 / EXPOSURE_LINEAR_GAMMA)
         })
     });
     b
@@ -1404,6 +1415,34 @@ mod tests {
             [0.25, 0.25, 0.25, 1.0],
         );
         assert!((neg[0] + 0.5).abs() < 1e-4, "{neg:?}");
+    }
+
+    /// Exposure on a red [1, 0, 0] solid against After Effects 2026 renders (sRGB working space,
+    /// not linearised, 32 bpc, 8-bit captures): the linear-light conversion is a pure 2.2 power.
+    /// The piecewise sRGB curve gave 2 / 7 / 39 for the three smallest Offsets.
+    #[test]
+    fn exposure_matches_after_effects_gamma_2_2() {
+        let red = [1.0, 0.0, 0.0, 1.0];
+        let code = |o: [f32; 4], i: usize| o[i] * 255.0;
+        // Master Offset only: G and B carry the curve; R goes over 1 (255 in the 8-bit capture).
+        for (offset, ae) in [(0.0005, 8.0), (0.002, 15.0), (0.02, 43.0), (0.1, 90.0)] {
+            let o = px("ec.color.exposure", &[("master/offset", num(offset))], red);
+            for i in [1, 2] {
+                assert!((code(o, i) - ae).abs() <= 1.0, "offset {offset}: {} vs AE {ae}", code(o, i));
+            }
+            assert!(o[0] >= 1.0, "{o:?}");
+        }
+        // Exposure −2.25: AE 126; with Bypass Linear Light Conversion (gain on encoded values) 54.
+        let o = px("ec.color.exposure", &[("master/exposure", num(-2.25))], red);
+        assert!((code(o, 0) - 126.0).abs() <= 1.0 && o[1] == 0.0, "{o:?}");
+        let o = px("ec.color.exposure", &[("master/exposure", num(-2.25)), ("bypassLinearLight", Value::Bool(true))], red);
+        assert!((code(o, 0) - 54.0).abs() <= 1.0 && o[1] == 0.0, "{o:?}");
+        // Default settings leave 32-bpc values alone, negative and over-range ones included.
+        let hdr = [-0.25, 0.5, 2.0, 1.0];
+        assert!(close(px("ec.color.exposure", &[], hdr), hdr, 1e-5));
+        // A negative Offset pushes black below zero, mirrored, rather than clipping or NaN.
+        let o = px("ec.color.exposure", &[("master/offset", num(-0.02))], [0.0, 0.0, 0.0, 1.0]);
+        assert!((o[0] + 0.02f32.powf(1.0 / 2.2)).abs() < 1e-5, "{o:?}");
     }
 
     #[test]
