@@ -14,12 +14,19 @@ fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
 
+/// Tint's luminance: Rec. 601 weights on the working-space values, as After Effects 2026
+/// renders it (sRGB working space, not linearised: red 76/255, green 150/255, blue 29/255).
+/// The GPU kernel (`pointwise` op 1) mirrors it.
+fn tint_luma(c: [f32; 3]) -> f32 {
+    0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+}
+
 fn tint(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let black = ctx.params.color("black");
     let white = ctx.params.color("white");
     let amt = ctx.params.f("amount") as f32 / 100.0;
     b.img.map_straight(|c| {
-        let l = luminance(c[0], c[1], c[2]).clamp(0.0, 1.0);
+        let l = tint_luma(c).clamp(0.0, 1.0);
         let t = [black[0] + (white[0] - black[0]) * l, black[1] + (white[1] - black[1]) * l, black[2] + (white[2] - black[2]) * l];
         mix(c, t, amt)
     });
@@ -1170,6 +1177,17 @@ mod tests {
             g.children.retain(|c| c.match_id() != param);
             crate::migrate::upgrade_instance(spec, &mut g, &mut Ids(&mut next), [10.0, 10.0]);
             assert_eq!(g.get(param).unwrap().value, want, "{id}");
+        }
+    }
+
+    /// After Effects 2026 renders of full-frame solids with Tint at its defaults (sRGB working
+    /// space, not linearised, 32 bpc, 8-bit capture): Rec. 601 weights on the encoded values.
+    #[test]
+    fn tint_defaults_match_after_effects_greys() {
+        for (c, want) in [([1.0, 0.0, 0.0], 76.0), ([0.0, 1.0, 0.0], 150.0), ([0.0, 0.0, 1.0], 29.0), ([0.5, 0.5, 0.5], 128.0)] {
+            let o = px("ec.color.tint", &[], [c[0], c[1], c[2], 1.0]);
+            let want = want / 255.0;
+            assert!(close(o, [want, want, want, 1.0], 1.0 / 255.0), "{c:?}: {o:?} vs {want}");
         }
     }
 

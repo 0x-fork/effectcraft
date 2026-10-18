@@ -15,7 +15,7 @@ After Effects', and does the preset library exist. The per-effect catalogue is t
 | Parameter names, order, popups, units, defaults | aligned in M9.12 | Agent-checked against After Effects' documentation, not against a live dump |
 | On the GPU | **280** (92%) | Measured: registry flags; GPU vs CPU agreement tested per effect |
 | 32-bit float, no clamping | 306 | Measured: registry flags |
-| **Rendered output matches After Effects** | **unmeasured** | No effect is compared with an After Effects render yet. `effectcraft_effects::fidelity::compare_frames` exists for the corpus ([fidelity/README.md](fidelity/README.md)); simulation effects are pinned by golden hashes of our own output (M13.27) |
+| **Rendered output matches After Effects** | **unmeasured** | Only Tint is checked against After Effects renders (four solids, within 1/255). `effectcraft_effects::fidelity::compare_frames` exists for the corpus ([fidelity/README.md](fidelity/README.md)); simulation effects are pinned by golden hashes of our own output (M13.27) |
 | Animation presets | **54** original presets (8 text-animator, 23 Transitions, 23 Backgrounds) against After Effects' **621** `.ffx` presets | Measured: `crates/engine/presets/text_animators.json`, `crates/engine/presets/transitions.json`, `crates/engine/presets/backgrounds.json`; the After Effects `Presets` folder |
 | 26.x additions | Curl Noise (26.3) present (#463 open); effect colour labels (26.5) present in Effect Controls only, not in the Timeline; the rebuilt Effect Controls (26.5) missing | Release notes |
 
@@ -30,7 +30,7 @@ corpus compares renders, each effect is assumed to differ somewhere, and users k
 | Audio | 13 | 0 | CPU by design (applied in the mixdown) |
 | Blur & Sharpen | 16 | 15 | Gaussian Blur interaction and output to be measured first ([fidelity/ae-2026-acceptance.md](fidelity/ae-2026-acceptance.md)) |
 | Channel | 13 | 13 | — |
-| Color Correction | 40 | 40 | Tint has Swap Colors (#963); ACES 2.0 / OCIO 2.5 (26.5); Apply Color LUT (#514) and 32-bpc blending (#494) are closed |
+| Color Correction | 40 | 40 | Tint has Swap Colors (#963) and matches After Effects 2026 renders of primary and grey solids (Rec. 601 luminance); ACES 2.0 / OCIO 2.5 (26.5); Apply Color LUT (#514) and 32-bpc blending (#494) are closed |
 | Distort | 39 | 35 | Liquify has no viewer brush; #303 (Mesh Warp drag) and #534 (CC Power Pin Unstretch) are closed |
 | Expression Controls | 9 | 9 | — |
 | Generate | 26 | 25 | Fractal on the CPU (needs f64); #526 (Reset) and #536 (Write-on marks) are closed |
@@ -64,6 +64,7 @@ the GPU is performance, not parity.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-18 | minor | Tint uses Rec. 601 luminance weights, measured against After Effects 2026 renders of red, green, blue and grey solids (CPU and GPU) |
 | 2026-10-12 | minor | Parameters 3,014 to 3,017 (effects.md); #303, #514, #526, #533–#536 marked closed instead of pending |
 | 2026-10-12 | minor | Effect colour labels (26.5) added in Effect Controls |
 | 2026-10-12 | minor | Tint's Swap Colors button and agent-drivable command (#963); undo/redo, instance targeting, animated layer-time edits and invalid-input tests |

@@ -851,6 +851,25 @@ fn effects_whose_kernels_failed_render_on_the_cpu() {
     }
 }
 
+/// The GPU Tint gives After Effects 2026's greys for full-frame solids at its defaults (sRGB
+/// working space, not linearised): Rec. 601 weights, as the CPU (`color_fx::tint_luma`).
+#[test]
+fn gpu_tint_defaults_match_after_effects_greys() {
+    let Some(g) = gpu() else { return };
+    for (col, want) in [([1.0, 0.0, 0.0], 76.0), ([0.0, 1.0, 0.0], 150.0), ([0.0, 0.0, 1.0], 29.0), ([0.5, 0.5, 0.5], 128.0)] {
+        let mut s = Scene::new(BitDepth::Bpc32);
+        s.p.settings.working_space = Some(ColorSpace::Srgb);
+        let mut l = s.solid(col, 97, 61);
+        s.effect(&mut l, "ec.color.tint", &[]);
+        s.push(l);
+        let mut r = Renderer::new(&s.p, &Pattern, RenderOpts { backend: Backend::Gpu, ..opts() });
+        r.accel = Some(g);
+        let o = g.render(&r, s.cid, Tick::ZERO).expect("the GPU renders the frame").get(48, 30);
+        let want = want / 255.0;
+        assert!(o[..3].iter().all(|v| (v - want).abs() <= 1.0 / 255.0), "{col:?}: {o:?} vs {want}");
+    }
+}
+
 /// A layer whose bounds change every frame reads back at a new size each time: the staging
 /// buffers kept for reuse stay within budget instead of growing for the whole render (#2081).
 #[test]
