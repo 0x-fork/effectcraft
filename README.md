@@ -120,8 +120,8 @@ or into the Timeline, between layers and at the time you point to.
 ## Effects
 
 306 built-in effects across its categories, each with its parameter names, order and
-defaults: blur and sharpen, channel, color correction (Curves, Levels, Hue/Saturation, Color
-Grading…), distort (Warp, Bulge, Turbulent Displace, CC Power Pin…), generate (Fractal Noise,
+defaults: blur and sharpen, channel, color correction (Curves, Levels, Hue/Saturation, a full
+color-grading panel…), distort (Warp, Bulge, Turbulent Displace, CC Power Pin…), generate (Fractal Noise,
 Gradient Ramp, Stroke, Write-on, Audio Spectrum…), keying, matte, noise and grain, perspective,
 **simulation** (CC Particle World, CC Rainfall, Shatter, Card Dance, Caustics, Wave World…),
 stylize (Glow, CC Glass…), **time** (Echo, Posterize Time, Timewarp, Time Displacement…),
@@ -226,19 +226,20 @@ case. Today it's a good place to try things and to tell us what breaks. It isn't
 for production client work. In particular:
 
 - **Native project format.** Projects are saved as `.ecproj`, readable versioned JSON. Proprietary
-  project formats and third-party commercial plug-ins are not supported.
-- **Fidelity is still being refined.** Automated testing across complex rendering pipelines is
-  ongoing, so please report visual discrepancies or unexpected behaviour.
+  project formats and After Effects SDK plug-ins are not supported.
+- **Fidelity is still being refined.** Automated rendering tests currently focus on small
+  compositions, so please report visual discrepancies or unexpected behaviour.
 - **macOS is the most tested platform.** Linux and Windows users have hit basic interaction
   bugs, which we're fixing first.
 - **The trained models are new.** Roto Brush can use MobileSAM (an optional 40 MB download in
   Settings ▸ Roto Brush) and face tracking can use Google's MediaPipe Face Landmarker (an optional
   3.8 MB download in Settings ▸ Face Tracking). Both are actively undergoing evaluation and tuning.
 
-EffectCraft is in **alpha**: about 91% of planned core features exist, and we estimate it is
-about 45% of the way to being ready for full professional production work. The [ROADMAP](ROADMAP.md)
-has the plan, [docs/target-app-parity.md](docs/target-app-parity.md) the measurement and
-[docs/gaps.md](docs/gaps.md) every known shortfall. The web build ([docs/web.md](docs/web.md)) runs the full app in the browser.
+EffectCraft is in **alpha**: about 91% of the features tracked in
+[docs/target-app-parity.md](docs/target-app-parity.md) exist, and we estimate it is about 45% of the
+way to being ready for full professional production work. The [ROADMAP](ROADMAP.md) has the plan,
+[docs/target-app-parity.md](docs/target-app-parity.md) the measurement and [docs/gaps.md](docs/gaps.md)
+every known shortfall. The web build ([docs/web.md](docs/web.md)) runs the full app in the browser.
 [Bug reports](https://github.com/storytold/effectcraft/issues) are the most useful thing you can
 send us right now.
 
