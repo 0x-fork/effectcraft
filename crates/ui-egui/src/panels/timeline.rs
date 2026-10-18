@@ -756,6 +756,8 @@ fn search_rows(l: &Layer, q: &str) -> Vec<Row> {
     fn all(l: &Layer, g: &PropGroup, depth: usize, out: &mut Vec<Row>) {
         for c in &g.children {
             match c {
+                // A shape group's inner Contents is elided (as in AE): no row, items at the same depth.
+                Node::Group(sg) if g.match_id == "group" && sg.match_id == "contents" => all(l, sg, depth, out),
                 Node::Group(sg) => {
                     out.push(group_row(l, sg, depth, g));
                     all(l, sg, depth + 1, out);
@@ -768,6 +770,8 @@ fn search_rows(l: &Layer, q: &str) -> Vec<Row> {
     fn rec(l: &Layer, g: &PropGroup, depth: usize, q: &str, out: &mut Vec<Row>) {
         for c in &g.children {
             match c {
+                // A shape group's inner Contents is elided (as in AE): search through it, no row.
+                Node::Group(sg) if g.match_id == "group" && sg.match_id == "contents" => rec(l, sg, depth, q, out),
                 Node::Group(sg) if depth > 1 || group_visible(sg, l) => {
                     // An effect group also matches the name the row draws, so a search finds
                     // `高斯模糊` in a Chinese interface and `Gaussian Blur` in an English one.
@@ -1176,6 +1180,11 @@ fn push_group(rows: &mut Vec<Row>, l: &Layer, g: &PropGroup, depth: usize, open:
         match c {
             // Text animators list their selectors and properties directly (as in AE).
             Node::Group(sg) if g.match_id == "animator" && matches!(sg.match_id.as_str(), "selectors" | "properties") => {
+                push_group(rows, l, sg, depth, open);
+            }
+            // A shape group's inner Contents (AE's elided `ADBE Vectors Group`): the group's items
+            // (path, fill/stroke, Transform) list directly under it, with no "Contents" row.
+            Node::Group(sg) if g.match_id == "group" && sg.match_id == "contents" => {
                 push_group(rows, l, sg, depth, open);
             }
             Node::Group(sg) => {
@@ -4368,6 +4377,21 @@ mod tests {
         let ctx = egui::Context::default();
         crate::menus::invoke(&mut app, &ctx, "timeline.search", json!({"query": "scale"})).unwrap();
         assert!(labels(&app).iter().any(|r| r.trim() == "Scale"));
+    }
+
+    /// A shape group's inner Contents (AE's elided `ADBE Vectors Group`) draws no row: a search
+    /// finds the group's items directly, and the only "Contents" row is the layer's.
+    #[test]
+    fn shape_group_inner_contents_is_elided() {
+        let mut s = effectcraft_engine::Session::default();
+        s.execute("comp.new", json!({"name": "T", "width": 320, "height": 180, "duration": 4})).unwrap();
+        s.execute("layer.newShape", json!({"kind": "rect"})).unwrap();
+        let mut app = EffectcraftApp::new(s);
+        app.ui.timeline.search = "rect".into();
+        let rows = labels(&app);
+        assert!(rows.iter().any(|r| r.trim() == ">Rectangle 1"), "the shape group matches: {rows:?}");
+        assert!(rows.iter().any(|r| r.trim() == ">Rectangle Path 1"), "its path lists directly under it: {rows:?}");
+        assert_eq!(rows.iter().filter(|r| r.trim() == ">Contents").count(), 1, "only the layer's Contents: {rows:?}");
     }
 
     #[test]
