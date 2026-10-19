@@ -199,23 +199,13 @@ fn fxk_point(@builtin(global_invocation_id) gid: vec3<u32>) {
             let thr = f0.x;
             let tol = f0.y;
             var m: f32;
+            // As effects::keying::luma_key: Brighter / Darker cut hard at the threshold
+            // (Tolerance only shapes Similar / Dissimilar), as After Effects.
             switch u0.y {
-                case 0u: {
-                    if (tol > 0.0) {
-                        m = clamp((thr + tol - l) / tol, 0.0, 1.0);
-                    } else {
-                        m = select(1.0, 0.0, l > thr);
-                    }
-                }
+                case 0u: { m = select(1.0, 0.0, l > thr); }
                 case 2u: { m = select(1.0, 0.0, abs(l - thr) <= tol); }
                 case 3u: { m = select(0.0, 1.0, abs(l - thr) <= tol); }
-                default: {
-                    if (tol > 0.0) {
-                        m = clamp((l - (thr - tol)) / tol, 0.0, 1.0);
-                    } else {
-                        m = select(1.0, 0.0, l < thr);
-                    }
-                }
+                default: { m = select(1.0, 0.0, l < thr); }
             }
             o = vec4<f32>(m);
         }
