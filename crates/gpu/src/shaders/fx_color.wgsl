@@ -102,6 +102,7 @@ fn fxc_sc_weights(c0: vec3<f32>) -> array<f32, 9> {
 
 // Black & White's Tint (effects::color_fx::bw_tint): the tint's hue and saturation at the
 // gray's luminosity (Color blend, weights 0.3 / 0.59 / 0.11, channels clipped toward the gray).
+// The weights are effects::BW_TINT_LUMA (checked by the test shader_constants_match_the_cpu).
 fn fxc_bw_tint(tint: vec3<f32>, gray: f32) -> vec3<f32> {
     if (!(gray > 0.0)) {
         return vec3<f32>(0.0);
@@ -191,7 +192,8 @@ fn fxc_point(@builtin(global_invocation_id) gid: vec3<u32>) {
         case 4u: {
             if (a > 0.0) {
                 let c = px.xyz / a;
-                // Rec. 601 weights, as effects::color_fx::tritone.
+                // Rec. 601 weights, as effects::color_fx::tritone: effects::LUMA_601 (checked by
+                // the test shader_constants_match_the_cpu).
                 let l = clamp(dot(c, vec3<f32>(0.299, 0.587, 0.114)), 0.0, 1.0);
                 var t: vec3<f32>;
                 if (l < 0.5) {

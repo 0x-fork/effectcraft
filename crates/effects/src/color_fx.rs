@@ -22,8 +22,12 @@ fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
 /// pure red, green and blue keep red (601: 76, 709: 54) and blue (29 / 18) and key out green
 /// (150 / 182). The GPU kernels (`pointwise` op 1, `fx_color` op 4, `fxk_key_luma`) mirror it.
 pub(crate) fn luma_601(c: [f32; 3]) -> f32 {
-    0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+    LUMA_601[0] * c[0] + LUMA_601[1] * c[1] + LUMA_601[2] * c[2]
 }
+
+/// The Rec. 601 luma weights of [`luma_601`]. The WGSL kernels repeat them as literals; the GPU
+/// test `shader_constants_match_the_cpu` checks that they are these.
+pub const LUMA_601: [f32; 3] = [0.299, 0.587, 0.114];
 
 fn tint(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let black = ctx.params.color("black");
@@ -337,6 +341,7 @@ pub fn exposure_settings(ctx: &EffectCtx) -> [(f32, f32, f32); 3] {
 /// The power curve Exposure's own linear-light conversion uses (Bypass Linear Light Conversion
 /// off). After Effects decodes with a pure 2.2 power, not the piecewise sRGB curve: Offset 0.0005
 /// on black measures 8/255 there, which 2.2 predicts (8.06) and sRGB does not (1.65).
+/// `kernels.wgsl` repeats it as a literal; the GPU test `shader_constants_match_the_cpu` checks it.
 pub const EXPOSURE_LINEAR_GAMMA: f32 = 2.2;
 
 /// Exposure: per channel, `(value · 2^exposure + offset)^(1 / gamma)`, in linear light unless
@@ -379,8 +384,12 @@ pub fn mirror_pow(v: f32, p: f32) -> f32 {
 /// back toward the gray). After Effects 2026 with Tint Color [1, 0.5, 0]: gray 0.1 (a red solid
 /// at Reds 10, case 717) → (43, 21, 0), gray 0.6 (yellow at defaults, case 825) → (255, 129, 2),
 /// white → white; the old hue / saturation / lightness mix gave (51, 26, 0) for the first.
+/// The luminosity weights of [`bw_tint`] (a Color blend's). `fx_color.wgsl` repeats them; the GPU
+/// test `shader_constants_match_the_cpu` checks that they are these.
+pub const BW_TINT_LUMA: [f32; 3] = [0.3, 0.59, 0.11];
+
 pub fn bw_tint(tint: [f32; 3], gray: f32) -> [f32; 3] {
-    let lum = |c: [f32; 3]| 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+    let lum = |c: [f32; 3]| BW_TINT_LUMA[0] * c[0] + BW_TINT_LUMA[1] * c[1] + BW_TINT_LUMA[2] * c[2];
     if !gray.is_finite() || gray <= 0.0 {
         return [0.0; 3];
     }

@@ -62,7 +62,8 @@ fn fxk_range_components(space: u32, c: vec3<f32>) -> vec3<f32> {
 }
 
 // keying::matte_levels.
-// Luma Key / Extract luminance: Rec. 601 (effects::color_fx::luma_601).
+// Luma Key / Extract luminance: Rec. 601, effects::LUMA_601 (checked by the test
+// shader_constants_match_the_cpu).
 fn fxk_key_luma(c: vec3<f32>) -> f32 {
     return dot(c, vec3<f32>(0.299, 0.587, 0.114));
 }

@@ -605,7 +605,8 @@ fn pointwise(@builtin(global_invocation_id) gid: vec3<u32>) {
         case 1u: {
             if (a > 0.0) {
                 let c = straight(px);
-                // Rec. 601 weights, as After Effects (effects crate luma_601).
+                // Rec. 601 weights, as After Effects: effects::LUMA_601 (checked by the test
+                // shader_constants_match_the_cpu).
                 let l = clamp(0.299 * c.x + 0.587 * c.y + 0.114 * c.z, 0.0, 1.0);
                 let blk = P.f[0].xyz;
                 let wht = P.f[1].xyz;
@@ -726,7 +727,8 @@ fn pointwise(@builtin(global_invocation_id) gid: vec3<u32>) {
                 var o = vec3<f32>(0.0);
                 for (var i = 0; i < 3; i++) {
                     // Per-channel gain, offset, gamma; negative values are mirrored. The
-                    // linear-light conversion is a pure 2.2 power (effects crate exposure).
+                    // linear-light conversion is a pure 2.2 power: effects::EXPOSURE_LINEAR_GAMMA
+                    // (checked by the test shader_constants_match_the_cpu).
                     if (P.u[0].y != 0u) {
                         let x = c[i] * P.f[0][i] + P.f[1][i];
                         o[i] = sign(x) * powz(abs(x), 1.0 / P.f[2][i]);
