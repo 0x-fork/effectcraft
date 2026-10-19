@@ -167,7 +167,8 @@ fn fxc_point(@builtin(global_invocation_id) gid: vec3<u32>) {
         case 4u: {
             if (a > 0.0) {
                 let c = px.xyz / a;
-                let l = clamp(luminance(c), 0.0, 1.0);
+                // Rec. 601 weights, as effects::color_fx::tritone.
+                let l = clamp(dot(c, vec3<f32>(0.299, 0.587, 0.114)), 0.0, 1.0);
                 var t: vec3<f32>;
                 if (l < 0.5) {
                     t = fxc_mix(P.f[2].xyz, P.f[1].xyz, l * 2.0);

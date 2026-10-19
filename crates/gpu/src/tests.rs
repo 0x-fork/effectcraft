@@ -852,7 +852,7 @@ fn effects_whose_kernels_failed_render_on_the_cpu() {
 }
 
 /// The GPU Tint gives After Effects 2026's greys for full-frame solids at its defaults (sRGB
-/// working space, not linearised): Rec. 601 weights, as the CPU (`color_fx::tint_luma`).
+/// working space, not linearised): Rec. 601 weights, as the CPU (`color_fx::luma_601`).
 #[test]
 fn gpu_tint_defaults_match_after_effects_greys() {
     let Some(g) = gpu() else { return };

@@ -14,10 +14,13 @@ fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
 
-/// Tint's luminance: Rec. 601 weights on the working-space values, as After Effects 2026
-/// renders it (sRGB working space, not linearised: red 76/255, green 150/255, blue 29/255).
-/// The GPU kernel (`pointwise` op 1) mirrors it.
-fn tint_luma(c: [f32; 3]) -> f32 {
+/// Rec. 601 luminance on the working-space values, as After Effects 2026 renders Tint, Tritone
+/// and the other Rec. 601 effects (sRGB working space, not linearised: red 76/255, green
+/// 150/255, blue 29/255). Tint and Tritone use it (Tritone, case 718: a red solid with
+/// Blend With Original 25 gives (132, 23, 46), from luminance 0.299; Rec. 709's 0.213 gave
+/// (113, 16, 49); on a grey ramp both weightings agree, case 815). The GPU kernels
+/// (`pointwise` op 1, `fx_color` op 4) mirror it.
+fn luma_601(c: [f32; 3]) -> f32 {
     0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
 }
 
@@ -26,7 +29,7 @@ fn tint(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let white = ctx.params.color("white");
     let amt = ctx.params.f("amount") as f32 / 100.0;
     b.img.map_straight(|c| {
-        let l = tint_luma(c).clamp(0.0, 1.0);
+        let l = luma_601(c).clamp(0.0, 1.0);
         let t = [black[0] + (white[0] - black[0]) * l, black[1] + (white[1] - black[1]) * l, black[2] + (white[2] - black[2]) * l];
         mix(c, t, amt)
     });
@@ -39,7 +42,7 @@ fn tritone(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let sh = ctx.params.color("shadows");
     let blend = 1.0 - ctx.params.f("blend") as f32 / 100.0;
     b.img.map_straight(|c| {
-        let l = luminance(c[0], c[1], c[2]).clamp(0.0, 1.0);
+        let l = luma_601(c).clamp(0.0, 1.0);
         let t = if l < 0.5 {
             mix([sh[0], sh[1], sh[2]], [mid[0], mid[1], mid[2]], l * 2.0)
         } else {
@@ -1248,6 +1251,29 @@ mod tests {
     /// #1463: Black & White's sliders set the gray of each pure hue and blend between
     /// neighbouring hues; neutral pixels keep their value, overbright ones too, and an overbright
     /// colour stays finite (it used to divide by zero).
+    /// After Effects 2026: Tritone Highlights [1, 1, 0.8], Midtones [0.6, 0.2, 0.2], Shadows
+    /// [0, 0, 0.3]. On a red solid with Blend With Original 25 (case 718) AE gives (132, 23, 46);
+    /// on a grey ramp (case 815) levels 0, 63.9, 127.6, 191.4 give (0, 0, 77), (77, 26, 64),
+    /// (153, 51, 51), (204, 153, 128).
+    #[test]
+    fn tritone_matches_after_effects() {
+        let colours = [
+            ("highlights", Value::Color([1.0, 1.0, 0.8, 1.0])),
+            ("midtones", Value::Color([0.6, 0.2, 0.2, 1.0])),
+            ("shadows", Value::Color([0.0, 0.0, 0.3, 1.0])),
+        ];
+        let near = |o: [f32; 4], ae: [f32; 3]| (0..3).all(|i| (o[i] * 255.0 - ae[i]).abs() <= 1.0);
+        let mut red = colours.to_vec();
+        red.push(("blend", num(25.0)));
+        let o = px("ec.color.tritone", &red, [1.0, 0.0, 0.0, 1.0]);
+        assert!(near(o, [132.0, 23.0, 46.0]), "{:?}", o.map(|v| v * 255.0));
+        for (level, ae) in [(0.1f32, [0.0, 0.0, 77.0]), (63.9, [77.0, 26.0, 64.0]), (127.6, [153.0, 51.0, 51.0]), (191.4, [204.0, 153.0, 128.0])] {
+            let v = level / 255.0;
+            let o = px("ec.color.tritone", &colours, [v, v, v, 1.0]);
+            assert!(near(o, ae), "level {level}: {:?} vs {ae:?}", o.map(|v| v * 255.0));
+        }
+    }
+
     #[test]
     fn black_white_sliders_set_the_gray_of_each_hue() {
         let bw = |vals: &[(&str, Value)], c: [f32; 3]| px("ec.color.blackwhite", vals, [c[0], c[1], c[2], 1.0]);

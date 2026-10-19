@@ -605,7 +605,7 @@ fn pointwise(@builtin(global_invocation_id) gid: vec3<u32>) {
         case 1u: {
             if (a > 0.0) {
                 let c = straight(px);
-                // Rec. 601 weights, as After Effects (effects crate tint_luma).
+                // Rec. 601 weights, as After Effects (effects crate luma_601).
                 let l = clamp(0.299 * c.x + 0.587 * c.y + 0.114 * c.z, 0.0, 1.0);
                 let blk = P.f[0].xyz;
                 let wht = P.f[1].xyz;
