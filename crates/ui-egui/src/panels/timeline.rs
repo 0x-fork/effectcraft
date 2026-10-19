@@ -2241,7 +2241,16 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
                     let tr = Rect::from_center_size(pos2(cw.mode + 76.0 + 6.0, cy), vec2(14.0, 14.0));
                     app.auto.add(&format!("timeline.layer.{}.preserveTransparency", layer.id.0), tr, "Preserve Transparency");
                     if widgets::checkbox(ui, tr, layer.preserve_transparency, &t, egui::Id::new(("pt", layer.id.0))).clicked() {
-                        actions.push(("layer.setSwitch".into(), json!({"layers": mode_targets(&comp, layer.id, &selected), "switch": "preserveTransparency"})));
+                        // The click gives the selection the state the clicked row toggles to,
+                        // whatever the first selected layer's value (as the switches do).
+                        actions.push((
+                            "layer.setSwitch".into(),
+                            json!({
+                                "layers": mode_targets(&comp, layer.id, &selected),
+                                "switch": "preserveTransparency",
+                                "value": !layer.preserve_transparency
+                            }),
+                        ));
                     }
                     // Track matte: layer picker + kind.
                     let mr = Rect::from_min_size(pos2(cw.trkmat + 2.0, cy - 9.0), vec2(104.0, 18.0));

@@ -225,3 +225,20 @@ fn the_modes_column_sets_the_whole_selection() {
     h.run_steps(2);
     assert_eq!(states(&h, &ids, preserved), [false; 4], "one undo step put both back");
 }
+
+/// Preserve Transparency toggles from the row it is clicked on, not from the first selected layer:
+/// A on and C off, clicking C's box turns both on.
+#[test]
+fn preserve_transparency_toggles_from_the_clicked_row() {
+    let (mut h, ids) = harness();
+    h.state_mut().ui.timeline.show_modes = true;
+    h.run_steps(3);
+    h.state_mut().session.execute("layer.setSwitch", json!({"layers": [ids[0]], "switch": "preserveTransparency", "value": true})).unwrap();
+    h.run_steps(2);
+    select(&mut h, &[ids[0], ids[2]]);
+    click(&mut h, &format!("timeline.layer.{}.preserveTransparency", ids[2]));
+    assert_eq!(states(&h, &ids, preserved), [true, false, true, false]);
+    // The next click turns both off again.
+    click(&mut h, &format!("timeline.layer.{}.preserveTransparency", ids[2]));
+    assert_eq!(states(&h, &ids, preserved), [false; 4]);
+}
