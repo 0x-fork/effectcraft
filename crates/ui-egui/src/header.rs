@@ -639,9 +639,15 @@ fn puppet_options(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter
     r.max.x + 16.0
 }
 
+/// A workspace's drawn name: built-ins read the menu bar's Window ▸ Workspace row; names the user
+/// saved stay verbatim, even when one matches a catalog source such as "Composition".
+fn workspace_label(name: &str) -> &str {
+    if crate::dock::WORKSPACES.contains(&name) { crate::i18n::command_label("window.workspace", name) } else { name }
+}
+
 fn ws_menu(app: &mut EffectcraftApp, ui: &mut egui::Ui) {
     for w in app.workspace_names() {
-        if ui.selectable_label(app.ui.workspace == w, crate::i18n::command_label("window.workspace", &w)).clicked() {
+        if ui.selectable_label(app.ui.workspace == w, workspace_label(&w)).clicked() {
             app.set_workspace(&w);
             ui.close();
         }
@@ -690,6 +696,15 @@ mod tests {
             },
         );
         out.textures_delta.clear();
+    }
+
+    #[test]
+    fn saved_workspace_names_stay_verbatim() {
+        crate::i18n::set_current("zh-hans");
+        assert_ne!(workspace_label("Default"), "Default");
+        assert_ne!(crate::i18n::tr("Composition"), "Composition");
+        assert_eq!(workspace_label("Composition"), "Composition");
+        crate::i18n::set_current("en");
     }
 
     #[test]
