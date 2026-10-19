@@ -708,15 +708,15 @@ impl Inner {
         }
     }
 
-    /// The frame of `footage` at `t`; a movie's resampled to `size` when it can be made at that
-    /// size directly (see [`FootageSource::frame_at_size`]).
+    /// The frame of `footage` at `t`, resampled to `size` (see [`FootageSource::frame_at_size`]):
+    /// a movie's made at that size directly, a still's resampled once and kept at that size.
     fn frame_at(self: &Arc<Self>, footage: &Footage, t: Tick, playback: bool, size: Option<(u32, u32)>, float: FloatCurve) -> Result<Arc<Image>> {
         if !footage.has_video {
             return Err(MediaError::Unsupported(format!("{}: no video", footage.path)));
         }
         let mut loc = Self::locate(footage, t, float);
         let movie = loc.media_t.is_some();
-        if movie && let Some(size) = size {
+        if let Some(size) = size {
             loc.key.size = size;
         }
         let mut c = lock(&self.cache);
@@ -773,34 +773,59 @@ impl Inner {
     #[cfg(target_arch = "wasm32")]
     fn prefetch(self: &Arc<Self>, _footage: &Footage, _t: Tick, _size: Option<(u32, u32)>, _float: FloatCurve) {}
 
+    /// A still (image file or sequence frame) of the footage's own size, at `loc.key.size` when
+    /// one is set: resampled as the renderer would ([`FootageSource::frame_at_size`]), so the
+    /// pool keeps the reduced frame and a reduced-resolution render neither decodes nor resamples
+    /// a large still again for every frame (#1812: 21120-px plates at Quarter).
+    fn still_at_size(img: Image, loc: &Loc, footage: &Footage) -> Image {
+        let (w, h) = loc.key.size;
+        if w == 0 || h == 0 || (img.width, img.height) != (footage.width, footage.height) || (w, h) == (img.width, img.height) {
+            return img;
+        }
+        effectcraft_raster::resample(&img, w, h)
+    }
+
     fn decode(&self, loc: &Loc, footage: &Footage) -> Result<Image> {
+        match loc.media_t {
+            None => self.decode_still(loc, footage).map(|img| Self::still_at_size(img, loc, footage)),
+            Some(_) => self.decode_media(loc, footage),
+        }
+    }
+
+    fn decode_still(&self, loc: &Loc, footage: &Footage) -> Result<Image> {
+        let op = AlphaOp::of(footage, loc.float);
+        let path = &loc.key.path;
+        if &**path == PLACEHOLDER {
+            return Ok(colour_bars(footage.width, footage.height));
+        }
+        let bytes = self.read(path)?;
+        if let Some(img) = crate::dpx::decode(path, &bytes)? {
+            return Ok(dynamic_to_image(&img, op));
+        }
+        if let Some(img) = crate::layered::decode(path, &bytes, footage, op)? {
+            return Ok(img);
+        }
+        // (an OpenEXR compression the decoder lacks came out transparent or as a missing
+        // channel error)
+        if path.to_ascii_lowercase().ends_with(".exr")
+            && let Some(why) = crate::exr_channels::unsupported_compression(&bytes)
+        {
+            return Err(MediaError::Decode(format!("{path}: {why}")));
+        }
+        let loaded = crate::probe::load_oriented(&bytes, crate::still_format(path, &bytes));
+        let img = match loaded {
+            Ok(img) => img,
+            // A multi-layer OpenEXR file without an unnamed RGB layer: its colour layer.
+            Err(e) => crate::exr_channels::cached_layered_image(path, bytes).ok_or_else(|| MediaError::Decode(format!("{path}: {e}")))?,
+        };
+        Ok(dynamic_to_image(&img, op))
+    }
+
+    fn decode_media(&self, loc: &Loc, footage: &Footage) -> Result<Image> {
         let op = AlphaOp::of(footage, loc.float);
         let path = &loc.key.path;
         match loc.media_t {
-            None if &**path == PLACEHOLDER => Ok(colour_bars(footage.width, footage.height)),
-            None => {
-                let bytes = self.read(path)?;
-                if let Some(img) = crate::dpx::decode(path, &bytes)? {
-                    return Ok(dynamic_to_image(&img, op));
-                }
-                if let Some(img) = crate::layered::decode(path, &bytes, footage, op)? {
-                    return Ok(img);
-                }
-                // (an OpenEXR compression the decoder lacks came out transparent or as a missing
-                // channel error)
-                if path.to_ascii_lowercase().ends_with(".exr")
-                    && let Some(why) = crate::exr_channels::unsupported_compression(&bytes)
-                {
-                    return Err(MediaError::Decode(format!("{path}: {why}")));
-                }
-                let loaded = crate::probe::load_oriented(&bytes, crate::still_format(path, &bytes));
-                let img = match loaded {
-                    Ok(img) => img,
-                    // A multi-layer OpenEXR file without an unnamed RGB layer: its colour layer.
-                    Err(e) => crate::exr_channels::cached_layered_image(path, bytes).ok_or_else(|| MediaError::Decode(format!("{path}: {e}")))?,
-                };
-                Ok(dynamic_to_image(&img, op))
-            }
+            None => self.decode_still(loc, footage),
             Some(mt) if gif_anim::is_animated(footage) => {
                 let anim = self.gif(path)?;
                 let frame = anim.frame_at(Tick(mt.0)).ok_or_else(|| MediaError::Decode(format!("{path}: no frames")))?;

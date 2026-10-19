@@ -580,6 +580,32 @@ fn sequence_gaps_show_placeholders() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #1812: a still asked for at a reduced size comes back as the renderer would resample it, and
+/// is kept at that size: later frames at that size neither decode nor resample it again (a
+/// parallax project's 21120-px plates were decoded and resampled for every frame at Quarter).
+#[test]
+fn stills_at_reduced_sizes_are_resampled_once() {
+    let dir = std::env::temp_dir().join(format!("ec-still-size-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let p = dir.join("plate.png");
+    let px = |x: u32, y: u32| {
+        image::Rgba([(x * 7 % 256) as u8, (y * 13 % 256) as u8, ((x ^ y) % 256) as u8, if (x + y).is_multiple_of(5) { 0 } else { 255 - (x % 128) as u8 }])
+    };
+    image::RgbaImage::from_fn(613, 97, px).save(&p).expect("png");
+    let f = probe(&p).expect("probe");
+    let pool = MediaPool::new();
+    let full = pool.frame(ItemId(1), &f, Tick::ZERO).expect("frame");
+    for (w, h) in [(306, 48), (153, 24), (77, 12)] {
+        let sized = pool.frame_at_size(ItemId(1), &f, Tick::ZERO, w, h).expect("frame");
+        assert_eq!(*sized, effectcraft_raster::resample(&full, w, h), "{w}×{h}: the renderer's resample");
+        let misses = pool.stats().misses;
+        let again = pool.frame_at_size(ItemId(1), &f, Tick(3 * TICKS_PER_SECOND), w, h).expect("frame");
+        assert!(Arc::ptr_eq(&sized, &again), "{w}×{h}: kept at that size");
+        assert_eq!(pool.stats().misses, misses, "{w}×{h}: not decoded again");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn png_with_alpha() {
     let Some(p) = alpha_png() else { return };
