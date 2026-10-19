@@ -194,3 +194,46 @@ fn a_bar_on_a_box_handle_leaves_it_the_press() {
     assert_eq!(layer.props.find(start).unwrap().value.as_f64(), 0.0, "Start stays");
     assert_ne!(scale(&h), before, "the handle scaled the layer");
 }
+
+/// The text the Timeline paints in property `uid`'s value field.
+fn timeline_value(h: &Harness<'_, EffectcraftApp>, uid: u64) -> String {
+    let e = h.state().auto.find(&format!("timeline.prop.{uid}.value")).unwrap_or_else(|| panic!("timeline.prop.{uid}.value isn't shown"));
+    let field = egui::Rect::from_min_size(pos2(e.rect[0], e.rect[1]), vec2(e.rect[2], e.rect[3]));
+    h.output()
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Text(t) if field.contains(t.visual_bounding_rect().center()) => Some(t.galley.text().to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// #1814: with Units = Index the Timeline shows the Range Selector's Start, End and Offset as
+/// counts, without the % sign they carry with Units = Percentage.
+#[test]
+fn index_units_show_start_end_and_offset_without_a_percent_sign() {
+    let (s, ids) = setup();
+    let l = LayerId(ids.layer);
+    let layer = s.active_comp().unwrap().layer(l).unwrap().clone();
+    let text = layer.props.sub("text").unwrap();
+    let anim = animator(&s, ids.layer);
+    let selectors = anim.sub("selectors").unwrap();
+    let sel = selectors.groups().next().unwrap();
+    let (offset, units) = (sel.get("offset").unwrap().uid, sel.prop("advanced/units").unwrap().uid);
+    let mut h = harness(s);
+    let tl = &mut h.state_mut().ui.timeline;
+    tl.open_layers.insert(ids.layer);
+    let animators = text.sub("animators").unwrap().uid;
+    tl.open_groups.extend([text.uid, animators, anim.uid, selectors.uid, sel.uid]);
+    h.run_steps(3);
+    for uid in [ids.start, ids.end, offset] {
+        assert!(timeline_value(&h, uid).ends_with('%'), "Percentage units: {}", timeline_value(&h, uid));
+    }
+    h.state_mut().session.execute("prop.set", json!({"layer": ids.layer, "prop": units, "value": 1})).unwrap();
+    h.run_steps(3);
+    for uid in [ids.start, ids.end, offset] {
+        let v = timeline_value(&h, uid);
+        assert!(!v.is_empty() && !v.contains('%'), "Index units: {v:?}");
+    }
+}
