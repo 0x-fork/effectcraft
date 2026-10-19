@@ -277,3 +277,18 @@ fn a_symbol_used_a_thousand_times_still_imports() {
     let doc = parse(svg.as_bytes()).unwrap();
     assert_eq!(depth_and_shapes(&doc.root).1, 3000);
 }
+
+#[test]
+fn font_size_percentage_resolves_against_the_parent_font_size() {
+    for (body, expected) in [
+        (r#"<g font-size="200%"><rect width="1em" height="1em"/></g>"#, 32.0),
+        (r#"<g font-size="200%"><rect width="2ex" height="1em"/></g>"#, 32.0),
+        (r#"<g font-size="200%"><g font-size="200%"><rect width="1em" height="1em"/></g></g>"#, 64.0),
+    ] {
+        let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">{body}</svg>"#);
+        let d = parse(svg.as_bytes()).unwrap();
+        let shapes = d.flatten();
+        assert_eq!(shapes.len(), 1);
+        assert!(matches!(shapes[0].2.geom, Geom::Rect { w, .. } if w == expected), "{body}: {:?}", shapes[0].2.geom);
+    }
+}

@@ -621,7 +621,11 @@ impl<'a, 'i> Parser<'a, 'i> {
         if let Some(c) = d.get("color").and_then(|v| parse_color(v)) {
             st.color = c;
         }
-        if let Some(v) = d.get("font-size").and_then(|v| self.length(v, 'o', st.font_size)) {
+        let font_size = d.get("font-size").and_then(|v| match v.trim().strip_suffix('%') {
+            Some(p) => p.trim().parse::<f64>().ok().map(|p| p / 100.0 * st.font_size),
+            None => self.length(v, 'o', st.font_size),
+        });
+        if let Some(v) = font_size.filter(|v| v.is_finite()) {
             st.font_size = v;
         }
         if let Some(p) = d.get("fill").and_then(|v| self.paint_ref(v)) {
