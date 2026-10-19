@@ -1341,6 +1341,12 @@ fn switch_targets(comp: &Comp, project: &Project, selected: &[LayerId], layer: u
     edited_layers(LayerId(layer), selected).into_iter().filter(|l| comp.layer(LayerId(*l)).is_some_and(|l| switch_applies(l, name, project))).collect()
 }
 
+/// The layers a Modes column edit on `layer`'s row (its blending mode, Preserve Transparency)
+/// acts on: [`edited_layers`] that have video.
+fn mode_targets(comp: &Comp, layer: LayerId, selected: &[LayerId]) -> Vec<u64> {
+    edited_layers(layer, selected).into_iter().filter(|l| comp.layer(LayerId(*l)).is_some_and(|l| l.source.is_av())).collect()
+}
+
 /// A layer's switch (A/V Features and Switches columns) in `row`, with the
 /// [`switch_gesture`].
 #[allow(clippy::too_many_arguments)]
@@ -2077,7 +2083,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
                         widgets::open_popup(ui, pop);
                     }
                     if let Some(lab) = widgets::label_popup(ui, pop, lr.left_bottom(), layer.label, |l| app.session.prefs.label_name(l), &t) {
-                        actions.push(("edit.label".into(), json!({"layers": [layer.id.0], "label": lab.name()})));
+                        actions.push(("edit.label".into(), json!({"layers": edited_layers(layer.id, &selected), "label": lab.name()})));
                     }
                 }
                 if vis.num {
@@ -2230,11 +2236,12 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
                         .flat_map(|m| if m.ends_group() { vec![m.label().to_string(), "-".to_string()] } else { vec![m.label().to_string()] })
                         .collect();
                     if let Some(i) = widgets::popup_menu(ui, pop, mr.left_bottom(), &opts, opts.iter().position(|o| o == layer.blend_mode.label())) {
-                        actions.push(("layer.setBlendMode".into(), json!({"layers": [layer.id.0], "mode": opts[i]})));
+                        actions.push(("layer.setBlendMode".into(), json!({"layers": mode_targets(&comp, layer.id, &selected), "mode": opts[i]})));
                     }
                     let tr = Rect::from_center_size(pos2(cw.mode + 76.0 + 6.0, cy), vec2(14.0, 14.0));
+                    app.auto.add(&format!("timeline.layer.{}.preserveTransparency", layer.id.0), tr, "Preserve Transparency");
                     if widgets::checkbox(ui, tr, layer.preserve_transparency, &t, egui::Id::new(("pt", layer.id.0))).clicked() {
-                        actions.push(("layer.setSwitch".into(), json!({"layers": [layer.id.0], "switch": "preserveTransparency"})));
+                        actions.push(("layer.setSwitch".into(), json!({"layers": mode_targets(&comp, layer.id, &selected), "switch": "preserveTransparency"})));
                     }
                     // Track matte: layer picker + kind.
                     let mr = Rect::from_min_size(pos2(cw.trkmat + 2.0, cy - 9.0), vec2(104.0, 18.0));

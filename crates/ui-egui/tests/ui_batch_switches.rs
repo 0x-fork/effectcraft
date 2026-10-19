@@ -1,12 +1,15 @@
-//! A Timeline switch clicked on one of several selected layers applies to the whole selection
-//! (#1849), as in After Effects. The engine commands already took several layers; the row
+//! A Timeline row control clicked on one of several selected layers applies to the whole
+//! selection (#1849), as in After Effects: the A/V Features and Switches columns, the label
+//! swatch and the Modes column. The engine commands already took several layers; the row
 //! controls used to pass the clicked layer alone.
 
 use effectcraft_engine::Session;
+use effectcraft_engine::color::{BlendMode, Label};
 use effectcraft_engine::project::{Layer, LayerId, Switches};
 use effectcraft_ui_egui::EffectcraftApp;
 use egui::{Event, Modifiers, Pos2, Rect, pos2, vec2};
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use serde_json::json;
 
 /// Comp "Main" with solids A (top) to D (bottom); returns their ids top to bottom.
@@ -46,6 +49,11 @@ fn drag(h: &mut Harness<'_, EffectcraftApp>, from: Pos2, to: Pos2, steps: u32) {
 /// A click on the Timeline control `id`.
 fn click(h: &mut Harness<'_, EffectcraftApp>, id: &str) {
     let p = rect(h, id).center();
+    drag(h, p, p, 1);
+}
+
+/// A click at `p` (a menu entry, found by its label).
+fn click_at(h: &mut Harness<'_, EffectcraftApp>, p: Pos2) {
     drag(h, p, p, 1);
 }
 
@@ -100,6 +108,10 @@ fn shy(l: &Layer) -> bool {
 
 fn motion_blur(l: &Layer) -> bool {
     l.switches.motion_blur
+}
+
+fn preserved(l: &Layer) -> bool {
+    l.preserve_transparency
 }
 
 /// #1849: a click on the Lock, 3D, Solo, Shy or Motion Blur switch of a selected layer gives the
@@ -176,4 +188,40 @@ fn alt_click_sets_the_selected_layers_apart() {
     assert_eq!(states(&h, &ids, video), [true, false, true, false]);
     alt_click(&mut h, &format!("timeline.layer.{}.video", ids[0]));
     assert_eq!(states(&h, &ids, video), [true; 4]);
+}
+
+/// The label swatch menu of a selected layer sets the label of every selected layer.
+#[test]
+fn the_label_menu_sets_the_selections_label() {
+    let (mut h, ids) = harness();
+    select(&mut h, &[ids[0], ids[2]]);
+    let green = h.state().session.prefs.label_name(Label::Green);
+    click(&mut h, &format!("timeline.layer.{}.label", ids[0]));
+    let entry = h.query_by_label(&green).expect("the label menu is open").rect();
+    click_at(&mut h, entry.center());
+    let label = |id: u64| h.state().session.active_comp().unwrap().layer(LayerId(id)).unwrap().label;
+    assert_eq!([label(ids[0]), label(ids[1]), label(ids[2]), label(ids[3])], [Label::Green, Label::Red, Label::Green, Label::Red]);
+}
+
+/// The Modes column: the Blending Mode menu and the Preserve Transparency checkbox of a selected
+/// layer set both selected layers, one undo step each.
+#[test]
+fn the_modes_column_sets_the_whole_selection() {
+    let (mut h, ids) = harness();
+    h.state_mut().ui.timeline.show_modes = true;
+    h.run_steps(3);
+    select(&mut h, &[ids[0], ids[2]]);
+
+    click(&mut h, &format!("timeline.layer.{}.mode", ids[0]));
+    let entry = h.query_by_label("Multiply").expect("the blend mode menu is open").rect();
+    click_at(&mut h, entry.center());
+    let mode = |id: u64| h.state().session.active_comp().unwrap().layer(LayerId(id)).unwrap().blend_mode;
+    assert_eq!([mode(ids[0]), mode(ids[1]), mode(ids[2]), mode(ids[3])], [BlendMode::Multiply, BlendMode::Normal, BlendMode::Multiply, BlendMode::Normal]);
+
+    click(&mut h, &format!("timeline.layer.{}.preserveTransparency", ids[0]));
+    assert_eq!(states(&h, &ids, preserved), [true, false, true, false]);
+
+    h.state_mut().session.execute("edit.undo", json!({})).unwrap();
+    h.run_steps(2);
+    assert_eq!(states(&h, &ids, preserved), [false; 4], "one undo step put both back");
 }
