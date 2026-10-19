@@ -480,15 +480,12 @@ fn fill(ctx: &EffectCtx, mut b: Buf) -> Buf {
         });
         return b;
     }
+    // Without masks the layer becomes the fill colour, and Opacity is the layer's opacity: After
+    // Effects 2026 renders Fill (0, 0.5, 1) at Opacity 50 % as that colour at half alpha, with
+    // nothing of the original showing through (it is not a mix with the original).
     b.img.data.iter_mut().for_each(|px| {
-        let a = if invert { 1.0 - px[3] } else { px[3] };
-        let f = [c[0] * a, c[1] * a, c[2] * a];
-        for i in 0..3 {
-            px[i] += (f[i] - px[i]) * opacity;
-        }
-        if invert {
-            px[3] += (a - px[3]) * opacity;
-        }
+        let a = if invert { 1.0 - px[3] } else { px[3] } * opacity;
+        *px = [c[0] * a, c[1] * a, c[2] * a, a];
     });
     b
 }
@@ -1664,6 +1661,30 @@ mod tests {
         // Without masks, Fill fills the layer as before.
         let plain = run_fx("ec.generate.fill", &[("fillMask", num(1.0))], grey.clone(), 0.0, EffectEnv::default()).img;
         assert_eq!(plain.get(10, 5), [1.0, 0.0, 0.0, 1.0]);
+    }
+
+    /// After Effects 2026: Fill (0, 0.5, 1) at Opacity 50 % on an opaque layer (a Gradient Ramp
+    /// on a red solid) renders premultiplied (0, 0.251, 0.502) at alpha 0.502 everywhere: the
+    /// fill colour at half the layer's alpha, nothing of the ramp left.
+    #[test]
+    fn fill_opacity_is_the_layers_opacity_as_in_after_effects() {
+        let mut img = Image::new(16, 4);
+        for x in 0..16 {
+            let v = x as f32 / 15.0;
+            for y in 0..4 {
+                img.set(x, y, [v, 0.0, 0.0, 1.0]);
+            }
+        }
+        let vals = [("color", Value::Color([0.0, 0.5, 1.0, 1.0])), ("opacity", num(50.0))];
+        let out = run_fx("ec.generate.fill", &vals, img, 0.0, EffectEnv::default()).img;
+        for x in [0, 7, 15] {
+            let p = out.get(x, 2);
+            let ae = [0.0, 0.251, 0.502, 0.502];
+            assert!(p.iter().zip(ae).all(|(v, a)| (v - a).abs() < 1.0 / 255.0), "x {x}: {p:?} vs AE {ae:?}");
+        }
+        // A half-transparent pixel ends at a quarter alpha, still the fill colour.
+        let half = run_fx("ec.generate.fill", &vals, Image::filled(2, 2, [0.2, 0.2, 0.2, 0.5]), 0.0, EffectEnv::default()).img;
+        assert_eq!(half.get(0, 0), [0.0, 0.125, 0.25, 0.25]);
     }
 
     #[test]

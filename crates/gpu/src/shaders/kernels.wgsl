@@ -766,17 +766,13 @@ fn pointwise(@builtin(global_invocation_id) gid: vec3<u32>) {
             let c = P.f[0];
             let invert = P.u[0].y != 0u;
             let opacity = P.f[1].x;
+            // The fill colour at the layer's (or inverted) alpha times Opacity (color_fx::fill).
             var fa = px.w;
             if (invert) {
                 fa = 1.0 - px.w;
             }
-            let f = c.xyz * fa;
-            let rgb = px.xyz + (f - px.xyz) * opacity;
-            var alpha = px.w;
-            if (invert) {
-                alpha = px.w + (fa - px.w) * opacity;
-            }
-            px = vec4<f32>(rgb, alpha);
+            fa = fa * opacity;
+            px = vec4<f32>(c.xyz * fa, fa);
         }
         case 8u: {
             // effects::color2::map_ca: transparent pixels only change through the alpha curve.

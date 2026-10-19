@@ -33,7 +33,7 @@ corpus compares renders, each effect is assumed to differ somewhere, and users k
 | Color Correction | 40 | 40 | Tint, Tritone and Black & White (sliders and Tint) match After Effects 2026 renders (Rec. 601 luminance); Levels (Individual Controls) matches After Effects 2026 in 32 bpc (channel controls before RGB, "Off for 32 bpc Color" unclipped; plain Levels' channel order not measured); Brightness & Contrast (non-legacy) within about 6/255 of After Effects 2026 ramps (negative settings invert the positive curves); Tint has Swap Colors (#963); ACES 2.0 / OCIO 2.5 (26.5); Apply Color LUT (#514) and 32-bpc blending (#494) are closed |
 | Distort | 39 | 35 | Liquify has no viewer brush; #303 (Mesh Warp drag) and #534 (CC Power Pin Unstretch) are closed |
 | Expression Controls | 9 | 9 | — |
-| Generate | 26 | 25 | 4-Color Gradient's Blend matches After Effects 2026 (weights 1 / (d² + Blend²)); Fractal on the CPU (needs f64); #526 (Reset) and #536 (Write-on marks) are closed |
+| Generate | 26 | 25 | 4-Color Gradient's Blend matches After Effects 2026 (weights 1 / (d² + Blend²)); Fill's Opacity is the filled layer's opacity, as After Effects 2026 renders it (with a Fill Mask it still mixes with the original, not measured); Fractal on the CPU (needs f64); #526 (Reset) and #536 (Write-on marks) are closed |
 | Immersive Video | 12 | 12 | — |
 | Keying | 12 | 12 | Luma Key and Extract key on Rec. 601 luminance, as After Effects 2026; Key Cleaner approximated; #533 (wire-removal Frame Offset) is closed |
 | Matte | 6 | 4 | Mocha shape reads our documented JSON, not Mocha's format |
@@ -71,6 +71,7 @@ the GPU is performance, not parity.
 | 2026-10-19 | minor | Luma Key: Key Out Brighter / Darker cut hard at Threshold, measured against After Effects 2026 renders of a ramp (CPU and GPU) |
 | 2026-10-19 | minor | Luma Key and Extract: Rec. 601 luminance (was Rec. 709), measured against After Effects 2026 (CPU and GPU) |
 | 2026-10-19 | minor | 4-Color Gradient: each point weighs 1 / (d² + Blend²), measured against After Effects 2026 at Blend 10 / 50 / 100 / 300 (CPU and GPU) |
+| 2026-10-19 | minor | Fill without a mask: the layer becomes the fill colour at its alpha × Opacity (was a mix with the original), measured against After Effects 2026 (CPU and GPU) |
 | 2026-10-18 | minor | Tint uses Rec. 601 luminance weights, measured against After Effects 2026 renders of red, green, blue and grey solids (CPU and GPU) |
 | 2026-10-18 | minor | Exposure converts to linear light with a pure 2.2 power curve, as measured in After Effects (Offset 0.0005 / 0.002 / 0.02 / 0.1 on black: 8 / 15 / 43 / 90), not the piecewise sRGB curve; its sliders take After Effects' ranges (Exposure −100..100, slider −4..4; Offset −2..2, slider −0.5..0.5; Gamma Correction 0.1..10) |
 | 2026-10-12 | minor | Parameters 3,014 to 3,017 (effects.md); #303, #514, #526, #533–#536 marked closed instead of pending |
