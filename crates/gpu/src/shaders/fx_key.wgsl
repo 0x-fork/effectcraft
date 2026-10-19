@@ -62,6 +62,11 @@ fn fxk_range_components(space: u32, c: vec3<f32>) -> vec3<f32> {
 }
 
 // keying::matte_levels.
+// Luma Key / Extract luminance: Rec. 601 (effects::color_fx::luma_601).
+fn fxk_key_luma(c: vec3<f32>) -> f32 {
+    return dot(c, vec3<f32>(0.299, 0.587, 0.114));
+}
+
 fn fxk_matte_levels(v: f32, in_b: f32, in_w: f32, gamma: f32, out_b: f32, out_w: f32) -> f32 {
     var t = clamp((v - in_b / 255.0) / max((in_w - in_b) / 255.0, 1e-4), 0.0, 1.0);
     t = powz(t, 1.0 / max(gamma, 0.01));
@@ -195,7 +200,7 @@ fn fxk_point(@builtin(global_invocation_id) gid: vec3<u32>) {
             o = vec4<f32>(select(1.0, 0.0, d <= f0.w));
         }
         case 2u: {
-            let l = luminance(c);
+            let l = fxk_key_luma(c);
             let thr = f0.x;
             let tol = f0.y;
             var m: f32;
@@ -231,7 +236,7 @@ fn fxk_point(@builtin(global_invocation_id) gid: vec3<u32>) {
                 case 2u: { v = c.y; }
                 case 3u: { v = c.z; }
                 case 4u: { v = a; }
-                default: { v = luminance(c); }
+                default: { v = fxk_key_luma(c); }
             }
             v = 255.0 * v;
             let bp = f0.x;

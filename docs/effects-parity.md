@@ -35,7 +35,7 @@ corpus compares renders, each effect is assumed to differ somewhere, and users k
 | Expression Controls | 9 | 9 | — |
 | Generate | 26 | 25 | Fractal on the CPU (needs f64); #526 (Reset) and #536 (Write-on marks) are closed |
 | Immersive Video | 12 | 12 | — |
-| Keying | 12 | 12 | Key Cleaner approximated; #533 (wire-removal Frame Offset) is closed |
+| Keying | 12 | 12 | Luma Key and Extract key on Rec. 601 luminance, as After Effects 2026; Key Cleaner approximated; #533 (wire-removal Frame Offset) is closed |
 | Matte | 6 | 4 | Mocha shape reads our documented JSON, not Mocha's format |
 | Noise & Grain | 13 | 12 | Curl Noise (#463); Match Grain on the CPU |
 | Obsolete | 9 | 9 | Luma Key matches After Effects 2026 on a grey ramp (hard cut, Tolerance only for Similar / Dissimilar) |
@@ -69,6 +69,7 @@ the GPU is performance, not parity.
 | 2026-10-19 | minor | Levels: "Off for 32 bpc Color" no longer clips in 32 bpc projects, unclipped values extrapolate below Output Black; Levels (Individual Controls) applies the channel controls before the RGB ones, measured against After Effects 2026 (CPU and GPU) |
 | 2026-10-19 | minor | Brightness & Contrast: negative Brightness / Contrast are the inverse curves of the positive ones (Brightness −40: 20/255 → 6/255 off After Effects 2026), CPU and GPU |
 | 2026-10-19 | minor | Luma Key: Key Out Brighter / Darker cut hard at Threshold, measured against After Effects 2026 renders of a ramp (CPU and GPU) |
+| 2026-10-19 | minor | Luma Key and Extract: Rec. 601 luminance (was Rec. 709), measured against After Effects 2026 (CPU and GPU) |
 | 2026-10-18 | minor | Tint uses Rec. 601 luminance weights, measured against After Effects 2026 renders of red, green, blue and grey solids (CPU and GPU) |
 | 2026-10-18 | minor | Exposure converts to linear light with a pure 2.2 power curve, as measured in After Effects (Offset 0.0005 / 0.002 / 0.02 / 0.1 on black: 8 / 15 / 43 / 90), not the piecewise sRGB curve; its sliders take After Effects' ranges (Exposure −100..100, slider −4..4; Offset −2..2, slider −0.5..0.5; Gamma Correction 0.1..10) |
 | 2026-10-12 | minor | Parameters 3,014 to 3,017 (effects.md); #303, #514, #526, #533–#536 marked closed instead of pending |

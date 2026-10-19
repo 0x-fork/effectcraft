@@ -2,12 +2,13 @@
 //! matte clean-up. Written from public behaviour descriptions and the standard colour-difference /
 //! blue-screen matting literature (Vlahos; Smith & Blinn, "Blue Screen Matting").
 
-use effectcraft_color::{luminance, rgb_to_hsl, srgb_to_linear};
+use effectcraft_color::{rgb_to_hsl, srgb_to_linear};
 use effectcraft_keyframe::Value;
 use effectcraft_project::ParamUi;
 use effectcraft_raster::{Image, gaussian_blur};
 use rayon::prelude::*;
 
+use crate::color_fx::luma_601;
 use crate::util::{Plane, gauss_plane, morph_frac, premul, unpremul};
 use crate::{Buf, EffectCtx, EffectSpec, col, num, p, popup, slider};
 
@@ -144,7 +145,7 @@ fn luma_key(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let thr = ctx.params.f("threshold") as f32 / 255.0;
     let tol = ctx.params.f("tolerance") as f32 / 255.0;
     let m = matte_of(&b.img, |c, _| {
-        let l = luminance(c[0], c[1], c[2]);
+        let l = luma_601([c[0], c[1], c[2]]);
         let keep = match kind {
             0 => l <= thr,
             2 => (l - thr).abs() > tol,
@@ -311,7 +312,7 @@ fn extract(ctx: &EffectCtx, mut b: Buf) -> Buf {
                 2 => c[1],
                 3 => c[2],
                 4 => a,
-                _ => luminance(c[0], c[1], c[2]),
+                _ => luma_601([c[0], c[1], c[2]]),
             };
         let mut k = 1.0f32;
         if v < bp {
@@ -824,6 +825,20 @@ mod tests {
         let f = key(1, 1.0, 2.5);
         for (y, ae) in [(590, 0.0), (591, 0.026), (592, 0.139), (593, 0.357), (594, 0.635), (595, 0.868), (596, 0.97), (597, 1.0)] {
             assert!((f[y] - ae).abs() < 0.2, "row {y}: {} vs AE {ae}", f[y]);
+        }
+    }
+
+    /// After Effects 2026: Key Out Darker and Extract's Black Point at 65 / 166 / 24 on pure
+    /// red / green / blue keep red and blue and key out green: Rec. 601 luminance (Rec. 709
+    /// would key out red and blue and keep green).
+    #[test]
+    fn luma_key_and_extract_use_rec601_as_after_effects() {
+        for (c, thr, kept) in [([1.0, 0.0, 0.0], 65.0, true), ([0.0, 1.0, 0.0], 166.0, false), ([0.0, 0.0, 1.0], 24.0, true)] {
+            let img = Image::filled(2, 1, [c[0], c[1], c[2], 1.0]);
+            let key = run("ec.key.luma", &[("keyType", Value::Enum(1)), ("threshold", num(thr))], img.clone());
+            let ext = run("ec.key.extract", &[("blackPoint", num(thr))], img);
+            let want = if kept { 1.0 } else { 0.0 };
+            assert_eq!((key.get(0, 0)[3], ext.get(0, 0)[3]), (want, want), "{c:?} at {thr}");
         }
     }
 

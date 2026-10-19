@@ -14,13 +14,14 @@ fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
 
-/// Rec. 601 luminance on the working-space values, as After Effects 2026 renders Tint, Tritone
-/// and the other Rec. 601 effects (sRGB working space, not linearised: red 76/255, green
-/// 150/255, blue 29/255). Tint and Tritone use it (Tritone, case 718: a red solid with
-/// Blend With Original 25 gives (132, 23, 46), from luminance 0.299; Rec. 709's 0.213 gave
-/// (113, 16, 49); on a grey ramp both weightings agree, case 815). The GPU kernels
-/// (`pointwise` op 1, `fx_color` op 4) mirror it.
-fn luma_601(c: [f32; 3]) -> f32 {
+/// Rec. 601 luminance on the working-space values (sRGB working space, not linearised: red
+/// 76/255, green 150/255, blue 29/255), as After Effects 2026 renders Tint, Tritone, Luma Key and
+/// Extract. Tritone, case 718: a red solid with Blend With Original 25 gives (132, 23, 46), from
+/// luminance 0.299; Rec. 709's 0.213 gave (113, 16, 49); on a grey ramp both weightings agree
+/// (case 815). Luma Key and Extract: Key Out Darker / Extract Black Point at 65, 166 and 24 on
+/// pure red, green and blue keep red (601: 76, 709: 54) and blue (29 / 18) and key out green
+/// (150 / 182). The GPU kernels (`pointwise` op 1, `fx_color` op 4, `fxk_key_luma`) mirror it.
+pub(crate) fn luma_601(c: [f32; 3]) -> f32 {
     0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
 }
 
