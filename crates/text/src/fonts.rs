@@ -1152,9 +1152,9 @@ mod tests {
         }
     }
 
-    /// Native: the script search picks a Georgian family for Mkhedruli (a face already loaded
-    /// that happens to cover it, such as macOS Helvetica, still wins in `fallback_for`). Skipped
-    /// where no family from the list is installed.
+    /// Native: Mkhedruli in a Latin-only family falls back to a family from the Georgian list,
+    /// ahead of faces already loaded and of the scan order. Skipped where no family from the list
+    /// is installed.
     #[test]
     fn georgian_falls_back_to_a_georgian_system_family() {
         scan_system();
@@ -1163,7 +1163,7 @@ mod tests {
             eprintln!("no Georgian family from the list is installed; skipping");
             return;
         }
-        let f = face(system_fallback(c, "Regular").unwrap());
+        let f = face(fallback_for(c, resolve("Inter", "Regular").face));
         assert!(f.has_char(c), "{} lacks it", f.info.family);
         assert!(GEORGIAN_FAMILIES.iter().any(|n| f.info.family.eq_ignore_ascii_case(n)), "{c} → {}", f.info.family);
     }
