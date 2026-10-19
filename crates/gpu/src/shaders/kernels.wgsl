@@ -624,14 +624,20 @@ fn pointwise(@builtin(global_invocation_id) gid: vec3<u32>) {
                 } else if (P.u[0].y == 2u) {
                     // Brightness & Contrast tone curves (effects crate bc_modern, AE-fitted #681).
                     var o = c;
-                    let g = max(1.0 + 0.53 * ct, 0.05);
+                    // Negative settings invert the positive curves (reciprocal exponents).
+                    var g = max(1.0 + 0.53 * abs(ct), 0.05);
+                    if (ct < 0.0) {
+                        g = 1.0 / g;
+                    }
+                    var e = exp2(1.24 * abs(br));
+                    if (br < 0.0) {
+                        e = 1.0 / e;
+                    }
                     for (var i = 0; i < 3; i++) {
                         if (c[i] < 1.0) {
                             var v = max(c[i], 0.0);
-                            if (br > 0.0) {
-                                v = 1.0 - powz(1.0 - v, exp2(1.24 * br));
-                            } else if (br < 0.0) {
-                                v = powz(v, exp2(-1.32 * br));
+                            if (br != 0.0) {
+                                v = 1.0 - powz(1.0 - v, e);
                             }
                             if (ct != 0.0) {
                                 if (v < 0.5) {

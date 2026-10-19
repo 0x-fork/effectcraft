@@ -59,18 +59,22 @@ fn tritone(ctx: &EffectCtx, mut b: Buf) -> Buf {
 /// power toward white (`1-(1-v)^e`) or black (`v^e`); contrast uses `g = 1 + 0.53 c` instead of
 /// the old `2^(2c)` (that crushed 0.25 to ~8/255 at Contrast 100; AE is ~40/255). Values above 1
 /// pass through. The GPU kernel mirrors it.
+///
+/// Negative Brightness and Contrast are the inverse curves of the positive ones (After Effects
+/// 2026 ramps: Brightness −40 is Brightness +40 inverted within 2.6/255, Contrast −50 likewise),
+/// so they use the reciprocal exponents: Brightness −40 was 20/255 off AE, now 6.2.
 pub fn bc_modern(v: f32, b: f32, c: f32) -> f32 {
     if v >= 1.0 {
         return v;
     }
     let mut v = v.max(0.0);
-    if b > 0.0 {
-        v = 1.0 - (1.0 - v).powf(2f32.powf(1.24 * b));
-    } else if b < 0.0 {
-        v = v.powf(2f32.powf(-1.32 * b));
+    if b != 0.0 {
+        let e = 2f32.powf(1.24 * b.abs());
+        v = 1.0 - (1.0 - v).powf(if b > 0.0 { e } else { 1.0 / e });
     }
     if c != 0.0 {
-        let g = (1.0 + 0.53 * c).max(0.05);
+        let g = (1.0 + 0.53 * c.abs()).max(0.05);
+        let g = if c > 0.0 { g } else { 1.0 / g };
         v = if v < 0.5 { 0.5 * (2.0 * v).powf(g) } else { 1.0 - 0.5 * (2.0 - 2.0 * v).max(0.0).powf(g) };
     }
     v
@@ -1337,6 +1341,32 @@ mod tests {
         // Hostile grays stay finite.
         for g in [f32::NAN, -1.0, 0.0, 4.0] {
             assert!(bw_tint([1.0, 0.5, 0.0], g).iter().all(|v| v.is_finite()));
+        }
+    }
+
+    /// After Effects 2026 ramps (RENDERER round 2, session R8): negative Brightness and Contrast
+    /// are the inverses of the positive curves. (brightness, contrast, input, AE 8-bit)
+    #[test]
+    fn negative_brightness_and_contrast_invert_the_positive_curves() {
+        let go = |b: f64, c: f64, x: u8| {
+            let v = x as f32 / 255.0;
+            (px("ec.color.brightnesscontrast", &[("brightness", num(b)), ("contrast", num(c))], [v, v, v, 1.0])[0] * 255.0).round() as i32
+        };
+        let samples: &[(f64, f64, u8, u8)] = &[
+            (-40.0, 0.0, 64, 50),
+            (-40.0, 0.0, 128, 99),
+            (-40.0, 0.0, 191, 155),
+            (-40.0, 0.0, 234, 207),
+            (0.0, -50.0, 21, 28),
+            (0.0, -50.0, 64, 76),
+            (0.0, -50.0, 191, 179),
+            (0.0, -50.0, 234, 227),
+            (40.0, 0.0, 128, 162),
+            (0.0, 50.0, 64, 52),
+        ];
+        for &(b, c, x, ae) in samples {
+            let got = go(b, c, x);
+            assert!((got - ae as i32).abs() <= 7, "B{b} C{c} in {x}: got {got} AE {ae}");
         }
     }
 
