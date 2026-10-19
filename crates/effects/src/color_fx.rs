@@ -207,14 +207,30 @@ fn hue_saturation(ctx: &EffectCtx, mut b: Buf) -> Buf {
 pub const LEVELS_CLIP: [&str; 3] = ["Off", "On", "Off for 32 bpc Color"];
 
 /// Whether Levels clips below Input Black / above Input White. "Off for 32 bpc Color" clips
-/// (effects can't see the project's bit depth; 8/16 bpc behaviour). The hidden `noClip` switch
-/// of projects saved before the two popups existed turns both off.
+/// in 8 and 16 bpc projects and not in 32 bpc ones (After Effects 2026, Levels (Individual
+/// Controls) in a 32 bpc project: values below Input Black end below Output Black). The hidden
+/// `noClip` switch of projects saved before the two popups existed turns both off.
 pub fn levels_clip(ctx: &EffectCtx) -> (bool, bool) {
     if ctx.params.b("noClip") {
         return (false, false);
     }
-    let on = |id: &str| ctx.params.get(id).is_none_or(|v| v.as_enum() != 0);
+    let on = |id: &str| levels_clip_on(ctx, id);
     (on("clipToOutputBlack"), on("clipToOutputWhite"))
+}
+
+/// One Clip To Output popup: 0 Off, 1 On, 2 Off for 32 bpc Color (missing: clip).
+pub fn levels_clip_on(ctx: &EffectCtx, id: &str) -> bool {
+    match ctx.params.get(id).map(|v| v.as_enum()) {
+        Some(0) => false,
+        Some(2) => !ctx.env.float_depth,
+        _ => true,
+    }
+}
+
+/// Levels' gamma on the normalised input `t`: unclipped values below Input Black extrapolate
+/// (the curve mirrored through 0) instead of stopping at Output Black.
+pub fn levels_gamma(t: f32, g: f32) -> f32 {
+    if t >= 0.0 { t.powf(1.0 / g) } else { -(-t).powf(1.0 / g) }
 }
 
 /// Levels' Channel popup.
@@ -242,8 +258,7 @@ fn level(v: f32, [ib, iw, g, ob, ow]: [f32; 5], (clip_b, clip_w): (bool, bool)) 
     if clip_w {
         t = t.min(1.0);
     }
-    let t = t.max(0.0).powf(1.0 / g);
-    ob + (ow - ob) * t
+    ob + (ow - ob) * levels_gamma(t, g)
 }
 
 const LEVELS_IDENTITY: [f32; 5] = [0.0, 1.0, 1.0, 0.0, 1.0];
@@ -286,7 +301,7 @@ pub fn levels_channel_settings(ctx: &EffectCtx) -> [([f32; 5], (bool, bool)); 4]
         let ids = levels_channel_ids(i + 1);
         let v: [f32; 5] = std::array::from_fn(|k| ctx.params.get(&ids[k]).map(|v| v.as_f64() as f32).unwrap_or(LEVELS_IDENTITY[k]));
         let pre = LEVELS_CHANNEL_PREFIX[i];
-        let on = |id: String| ctx.params.get(&id).is_none_or(|v| v.as_enum() != 0);
+        let on = |id: String| levels_clip_on(ctx, &id);
         let clip = if ctx.params.b("noClip") { (false, false) } else { (on(format!("{pre}ClipToOutputBlack")), on(format!("{pre}ClipToOutputWhite"))) };
         ([v[0], v[1], v[2].max(0.01), v[3], v[4]], clip)
     })

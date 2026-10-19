@@ -30,7 +30,7 @@ corpus compares renders, each effect is assumed to differ somewhere, and users k
 | Audio | 13 | 0 | CPU by design (applied in the mixdown) |
 | Blur & Sharpen | 16 | 15 | Gaussian Blur interaction and output to be measured first ([fidelity/ae-2026-acceptance.md](fidelity/ae-2026-acceptance.md)) |
 | Channel | 13 | 13 | — |
-| Color Correction | 40 | 40 | Tint, Tritone and Black & White (sliders and Tint) match After Effects 2026 renders (Rec. 601 luminance); Tint has Swap Colors (#963); ACES 2.0 / OCIO 2.5 (26.5); Apply Color LUT (#514) and 32-bpc blending (#494) are closed |
+| Color Correction | 40 | 40 | Tint, Tritone and Black & White (sliders and Tint) match After Effects 2026 renders (Rec. 601 luminance); Levels (Individual Controls) matches After Effects 2026 in 32 bpc (channel controls before RGB, "Off for 32 bpc Color" unclipped; plain Levels' channel order not measured); Tint has Swap Colors (#963); ACES 2.0 / OCIO 2.5 (26.5); Apply Color LUT (#514) and 32-bpc blending (#494) are closed |
 | Distort | 39 | 35 | Liquify has no viewer brush; #303 (Mesh Warp drag) and #534 (CC Power Pin Unstretch) are closed |
 | Expression Controls | 9 | 9 | — |
 | Generate | 26 | 25 | Fractal on the CPU (needs f64); #526 (Reset) and #536 (Write-on marks) are closed |
@@ -66,6 +66,7 @@ the GPU is performance, not parity.
 |---|---|---|
 | 2026-10-19 | minor | Tritone uses Rec. 601 luminance, measured against After Effects 2026 renders of a red solid and a grey ramp (CPU and GPU) |
 | 2026-10-19 | minor | Black & White's Tint keeps the gray's luminosity (Color blend), measured against After Effects 2026 renders (CPU and GPU) |
+| 2026-10-19 | minor | Levels: "Off for 32 bpc Color" no longer clips in 32 bpc projects, unclipped values extrapolate below Output Black; Levels (Individual Controls) applies the channel controls before the RGB ones, measured against After Effects 2026 (CPU and GPU) |
 | 2026-10-18 | minor | Tint uses Rec. 601 luminance weights, measured against After Effects 2026 renders of red, green, blue and grey solids (CPU and GPU) |
 | 2026-10-18 | minor | Exposure converts to linear light with a pure 2.2 power curve, as measured in After Effects (Offset 0.0005 / 0.002 / 0.02 / 0.1 on black: 8 / 15 / 43 / 90), not the piecewise sRGB curve |
 | 2026-10-18 | minor | Exposure converts to linear light with a pure 2.2 power curve, as measured in After Effects (Offset 0.0005 / 0.002 / 0.02 / 0.1 on black: 8 / 15 / 43 / 90), not the piecewise sRGB curve; its sliders take After Effects' ranges (Exposure −100..100, slider −4..4; Offset −2..2, slider −0.5..0.5; Gamma Correction 0.1..10) |

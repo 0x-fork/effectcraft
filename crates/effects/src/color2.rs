@@ -201,7 +201,7 @@ impl Lv {
         if clip_w {
             t = t.min(1.0);
         }
-        self.ob + (self.ow - self.ob) * t.max(0.0).powf(1.0 / self.g.max(0.01))
+        self.ob + (self.ow - self.ob) * crate::color_fx::levels_gamma(t, self.g.max(0.01))
     }
 }
 
@@ -217,7 +217,10 @@ fn levels_ic(ctx: &EffectCtx, mut b: Buf) -> Buf {
         return b;
     }
     let clip = crate::color_fx::levels_clip(ctx);
-    map_ca(&mut b.img, |c, a| ([0, 1, 2].map(|i| lv[i + 1].apply(lv[0].apply(c[i], clip), clip)), lv[4].apply(a, clip).clamp(0.0, 1.0)));
+    // Each channel's own controls first, then the RGB controls: After Effects 2026 with RGB
+    // (0.1, 0.9, gamma 1.5, 0.05, 0.95) and Green Input White 0.8 maps grey 32/255 to green
+    // 52/255 (RGB first would give 45).
+    map_ca(&mut b.img, |c, a| ([0, 1, 2].map(|i| lv[0].apply(lv[i + 1].apply(c[i], clip), clip)), lv[4].apply(a, clip).clamp(0.0, 1.0)));
     b
 }
 
@@ -1137,6 +1140,63 @@ mod tests {
         assert!((out.data[0][0] - 0.75).abs() < 1e-3);
         let red = run("ec.color.curves", &img, &[("red", Value::Str("0,1 1,1".into()))]);
         assert!((red.data[0][0] - 1.0).abs() < 1e-4 && (red.data[0][1] - 0.5).abs() < 1e-6);
+    }
+
+    /// After Effects 2026, 32 bpc project, Levels (Individual Controls) with RGB Input Black 0.1,
+    /// Input White 0.9, Gamma 1.5, Output Black 0.05, Output White 0.95, Red Gamma 0.8, Green
+    /// Input White 0.8, Blue Output Black 0.2, both clips "Off for 32 bpc Color", on grey steps:
+    /// the channel controls run first, nothing clips (8-bit captures clamp the results).
+    #[test]
+    fn levels_ic_matches_after_effects_in_32_bpc() {
+        let steps = [0, 16, 32, 64, 96, 128, 160, 192, 224, 255];
+        let ae = [
+            [0, 0, 70],
+            [0, 0, 88],
+            [0, 52, 104],
+            [61, 108, 132],
+            [102, 150, 158],
+            [138, 187, 181],
+            [171, 220, 203],
+            [203, 250, 223],
+            [233, 255, 243],
+            [255, 255, 255],
+        ];
+        let mut img = Image::new(10, 1);
+        for (x, v) in steps.iter().enumerate() {
+            let v = *v as f32 / 255.0;
+            img.set(x as u32, 0, [v, v, v, 1.0]);
+        }
+        let vals = [
+            ("rgb/rgbInBlack", Value::Scalar(0.1)),
+            ("rgb/rgbInWhite", Value::Scalar(0.9)),
+            ("rgb/rgbGamma", Value::Scalar(1.5)),
+            ("rgb/rgbOutBlack", Value::Scalar(0.05)),
+            ("rgb/rgbOutWhite", Value::Scalar(0.95)),
+            ("red/redGamma", Value::Scalar(0.8)),
+            ("green/greenInWhite", Value::Scalar(0.8)),
+            ("blue/blueOutBlack", Value::Scalar(0.2)),
+        ];
+        let s = find("ec.color.levelsic").unwrap();
+        let mut params = Params { values: s.params.iter().map(|p| (p.id.to_string(), p.default.clone())).collect() };
+        for (k, v) in &vals {
+            params.values.insert(k.to_string(), v.clone());
+        }
+        let render = |float_depth: bool| {
+            let env = crate::EffectEnv { float_depth, ..Default::default() };
+            let ctx = EffectCtx { params: &params, time: 0.0, layer_size: [10.0, 1.0], seed: 1, adjustment: false, env };
+            (s.render)(&ctx, Buf { img: img.clone(), offset: [0.0, 0.0], scale: 1.0 }).img
+        };
+        let out = render(true);
+        for (x, want) in ae.iter().enumerate() {
+            let p = out.get(x as i64, 0);
+            for c in 0..3 {
+                let got = p[c].clamp(0.0, 1.0) * 255.0;
+                assert!((got - want[c] as f32).abs() <= 2.0, "step {} channel {c}: {got} vs AE {}", steps[x], want[c]);
+            }
+        }
+        // In 8 / 16 bpc "Off for 32 bpc Color" clips: black stops at Output Black.
+        let clipped = render(false);
+        assert!((clipped.get(0, 0)[0] - 0.05).abs() < 1e-5, "{:?}", clipped.get(0, 0));
     }
 
     #[test]

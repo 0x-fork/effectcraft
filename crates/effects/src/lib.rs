@@ -406,6 +406,8 @@ pub struct EffectEnv<'a> {
     pub working_space: Option<effectcraft_color::ColorSpace>,
     /// Working-space pixels are linear light (Linearize Working Space).
     pub working_linear: bool,
+    /// The project works in 32 bpc float (Levels' "Off for 32 bpc Color" clips only below it).
+    pub float_depth: bool,
     /// The composition's shutter (angle and phase in degrees, samples per frame) when both the
     /// comp's and the layer's motion blur switches are on (Transform's Use Composition's
     /// Shutter Angle).
