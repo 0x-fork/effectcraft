@@ -24,7 +24,8 @@ interface; Arabic and Hebrew text *in layers* is supported through its Middle Ea
 - **Panels, dialogs, buttons, tooltips:** `crates/ui-egui/src/i18n/ui.rs`, keyed by the English
   source string, with English fallback. Catalogs exist for Japanese (410 rows), Simplified and
   Traditional Chinese (506 each), Ukrainian (505), Brazilian Portuguese (400) and Czech (501);
-  counted at 470ea7a3; Georgian has every row the Chinese catalogs have.
+  counted at 470ea7a3. Georgian has every row the Chinese catalogs have at this revision (695, as
+  both Chinese catalogs now have), plus 191 for panels converted to the catalog.
 - **Effect names:** `crates/ui-egui/src/i18n/effects.rs`, keyed by **effect id**, in Simplified
   Chinese and Georgian (307 rows, one per effect in the registry, plus its 21 categories). The registry's
   English name stays the effect's identity: `effect.list`, `effect.apply {"effect": …}`, scripts
