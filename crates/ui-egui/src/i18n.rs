@@ -173,6 +173,14 @@ pub(crate) fn command_label<'a>(command: &str, source: &'a str) -> &'a str {
     row(source).or_else(|| row(dotted.as_deref()?)).unwrap_or_else(|| tr(source))
 }
 
+/// A Settings page's title as the menu bar's Settings submenu draws it, without the ellipsis; the
+/// panel catalog's row for pages that have no menu row. The panel catalog's "Type" is the kind
+/// (Camera Settings, the Project panel's column), while the Type page is about text.
+pub(crate) fn settings_page_title(title: &str) -> &str {
+    let menu = menu_catalog(ui::current()).and_then(|c| c.iter().find(|(id, en, _)| *id == "app.settings" && en.strip_suffix("...") == Some(title)));
+    menu.and_then(|(_, _, translated)| translated.strip_suffix("...")).unwrap_or_else(|| tr(title))
+}
+
 /// `source` looked up in `catalog` by (command, English label); the source itself when the pair is
 /// absent, so computed labels and user names stay verbatim.
 fn lookup<'a>(catalog: &[(&str, &str, &'a str)], command: &str, source: &'a str) -> &'a str {
@@ -6689,6 +6697,16 @@ mod tests {
         assert_eq!(command_label("window.panel", "Comp 1"), "Comp 1");
         set_current("en");
         assert_eq!(command_label("window.panel", "Project"), "Project");
+    }
+
+    #[test]
+    fn settings_page_titles_read_the_menu_row() {
+        set_current("zh-hans");
+        assert_eq!(settings_page_title("Type"), "文字");
+        assert_eq!(tr("Type"), "类型");
+        assert_eq!(settings_page_title("Roto Brush"), tr("Roto Brush"));
+        set_current("en");
+        assert_eq!(settings_page_title("Type"), "Type");
     }
 
     #[test]
