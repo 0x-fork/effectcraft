@@ -505,6 +505,19 @@ impl PlacedGlyph {
     fn bold_in_layer(&self) -> f64 {
         self.bold * self.m2().mean_scale()
     }
+    /// Whether [`Self::bold`] grows the outline as evenly in layer space as in character space:
+    /// no bold, or a matrix that only rotates and scales uniformly.
+    fn bold_is_even(&self) -> bool {
+        let [[a, b, _], [c, d, _], _] = self.m2().0;
+        let n = a * a + b * b + c * c + d * d;
+        self.bold == 0.0 || ((a * a + c * c - b * b - d * d).abs() <= 1e-9 * n && (a * b + c * d).abs() <= 1e-9 * n)
+    }
+}
+
+/// How far a circle of radius `r` reaches along x and along y once mapped by `m`.
+fn axis_reach(m: &Mat3, r: f64) -> [f64; 2] {
+    let [[a, b, _], [c, d, _], _] = m.0;
+    [r * a.hypot(b), r * c.hypot(d)]
 }
 
 /// How far Faux Bold grows a glyph's outline on every side, as a fraction of its size: Inter
@@ -929,12 +942,15 @@ fn runs(geom: &TextGeom) -> Vec<(Vec<usize>, bool)> {
         if g.xf.opacity <= 0.0 {
             continue;
         }
+        // A run grows its outline in layer space by one radius, which matches each glyph grown in
+        // its own space only when the bold stays round there.
         if geom.blend == BlendMode::Normal
             && solid_fill(g, stroke)
+            && g.bold_is_even()
             && let Some((run, false)) = out.last_mut()
             && run.last().is_some_and(|&p| {
                 let q = &geom.glyphs[p];
-                solid_fill(q, false) && q.fill == g.fill && (q.bold_in_layer() - g.bold_in_layer()).abs() < 1e-6
+                solid_fill(q, false) && q.fill == g.fill && q.bold_is_even() && (q.bold_in_layer() - g.bold_in_layer()).abs() < 1e-6
             })
         {
             run.push(gi);
@@ -967,13 +983,16 @@ fn draw_glyphs(geom: &TextGeom, img: &mut Image, to_px: &Mat3, s: f64, only: Opt
         };
         let Some(b) = effectcraft_path::bounds(&paths) else { continue };
         let blur = [g.xf.blur[0] * s, g.xf.blur[1] * s];
-        let pad = (g.stroke_width + 2.0 * bold) * m.mean_scale() + 2.0 + blur[0].max(blur[1]) * 1.5;
+        // Stroke and bold grow the outline in the paths' space: under a non-uniform `m` they reach
+        // further along one axis than the other.
+        let [px, py] = axis_reach(&m, g.stroke_width + 2.0 * bold);
+        let pad = 2.0 + blur[0].max(blur[1]) * 1.5;
         let r = m.map_rect(&effectcraft_geom::Rect::new(b.x0, b.y0, b.x1, b.y1));
         let rect = [
-            ((r.x0 - pad).floor() as i64).max(0),
-            ((r.y0 - pad).floor() as i64).max(0),
-            ((r.x1 + pad).ceil() as i64).min(w),
-            ((r.y1 + pad).ceil() as i64).min(h),
+            ((r.x0 - px - pad).floor() as i64).max(0),
+            ((r.y0 - py - pad).floor() as i64).max(0),
+            ((r.x1 + px + pad).ceil() as i64).min(w),
+            ((r.y1 + py + pad).ceil() as i64).min(h),
         ];
         if rect[2] <= rect[0] || rect[3] <= rect[1] {
             continue;
@@ -990,8 +1009,9 @@ pub fn render(ctx: &EvalCtx, layer: &Layer, s: f64) -> Buf {
     let mut bounds: Option<kurbo::Rect> = None;
     for g in &geom.glyphs {
         if let Some(b) = effectcraft_path::bounds(&[g.path()]) {
-            let pad = g.stroke_width + 2.0 * g.bold_in_layer() + 2.0 + g.xf.blur[0].max(g.xf.blur[1]) * 1.5;
-            let b = b.inflate(pad, pad);
+            let [bx, by] = axis_reach(&g.m2(), 2.0 * g.bold);
+            let pad = g.stroke_width + 2.0 + g.xf.blur[0].max(g.xf.blur[1]) * 1.5;
+            let b = b.inflate(pad + bx, pad + by);
             bounds = Some(bounds.map_or(b, |a| a.union(b)));
         }
     }
