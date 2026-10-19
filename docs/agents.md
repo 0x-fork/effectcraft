@@ -595,6 +595,12 @@ Extension points and the bundled extensions: [plugins.md](plugins.md).
   properties, FF missing effects, EE Expressions, LL Waveform, UU everything changed from its
   default. Shift+key adds or removes a set; the same key again hides it; Ctrl/Cmd+` twirls the
   selected layers open or closed. With no layer selected they apply to every layer.
+* A row control clicked on one of several selected layers applies to every selected layer, as in
+  After Effects: the A/V switches (video, audio, solo, lock), the Switches column (shy, collapse,
+  quality, fx, frame blending, motion blur, adjustment, 3D), the label swatch and the Modes column
+  (blending mode, Preserve Transparency), one undo step, with the layers the switch doesn't apply
+  to left out. A control on an unselected row changes that layer alone; Alt-clicking an A/V feature
+  still sets the selected layers apart from the rest.
 * `keys.toggleTransform {"layers"?: [...], "prop": "position"}` (Alt+Shift+A/P/S/R/T) adds or
   removes a keyframe at the current time on that Transform property of each layer, in one undo
   step (separated X/Y/Z Position; Orientation and X/Y/Z Rotation on 3D layers).
