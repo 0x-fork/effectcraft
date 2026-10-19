@@ -46,8 +46,8 @@ fn aux_at(t: Tick) -> AuxChannels {
 }
 
 impl FootageSource for Crypto {
-    fn frame(&self, _: ItemId, _: &Footage, _: Tick) -> Option<Arc<Image>> {
-        Some(Arc::new(Image::new(8, 4)))
+    fn frame(&self, _: ItemId, f: &Footage, _: Tick) -> Option<Arc<Image>> {
+        Some(Arc::new(Image::new(f.width, f.height)))
     }
     fn aux(&self, _: ItemId, _: &Footage, t: Tick) -> Option<Arc<AuxChannels>> {
         Some(Arc::new(aux_at(t)))
@@ -58,11 +58,13 @@ struct Probe;
 impl crate::Importer for Probe {
     fn probe(&self, path: &str) -> Result<Footage, String> {
         let duration = Tick::from_seconds_f64(2.0);
+        // A half-size proxy of the EXR.
+        let (width, height) = if path.contains("proxy") { (4, 2) } else { (8, 4) };
         Ok(Footage {
             path: path.into(),
             kind: FootageKind::Video,
-            width: 8,
-            height: 4,
+            width,
+            height,
             has_video: true,
             frame_rate: FrameRate::from_f64(24.0),
             duration,
@@ -178,4 +180,157 @@ fn picks_on_a_precomp_of_a_3d_comp() {
     s.execute_checked("effect.apply", json!({"effect": "Cryptomatte"})).unwrap();
     let r = s.execute_checked("effect.pickCryptomatte", json!({"effect": 1, "x": 20, "y": 10})).unwrap();
     assert_eq!((r["name"].as_str(), r["selection"].as_str()), (Some("Red, Ball"), Some("\"Red, Ball\"")), "{r}");
+}
+
+/// The matte the rendered Cryptomatte effect gives the picked ID at the buffer pixel under
+/// `{x, y}`: the pick has to name the ID the effect's own input buffer samples there.
+fn rendered_matte_of_pick(s: &mut Session, x: f64, y: f64, scale: f64) -> (String, f32) {
+    let r = s.execute_checked("effect.pickCryptomatte", json!({"effect": "Cryptomatte", "x": x, "y": y, "scale": scale, "mode": "replace"})).unwrap();
+    let fx = s.active_comp().unwrap().layers[0].effects().unwrap().groups().position(|g| g.match_id == "ec.3d.cryptomatte").unwrap() + 1;
+    s.execute_checked("prop.set", json!({"path": format!("effects/#{fx}/matteOnly"), "value": true})).unwrap();
+    let (cid, comp) = (s.active_comp_id().unwrap(), s.active_comp().unwrap());
+    let layer = &comp.layers[0];
+    let ctx = effectcraft_render::EvalCtx { project: &s.project, comp_id: cid, comp, time: Tick::ZERO, expr: None, footage: None };
+    let buf = s.renderer(effectcraft_render::RenderOpts { scale, ..Default::default() }).content_buf(&ctx, layer).unwrap();
+    let (px, py) = buf.to_px([x, y]);
+    let m = buf.img.get(px.floor() as i64, py.floor() as i64)[0];
+    (r["name"].as_str().unwrap_or("?").to_string(), m)
+}
+
+/// Between 3/4 and full resolution footage keeps its native pixels: at 0.8 the effect samples
+/// layer pixel 2 (the comma name, 0.7) at x = 2.2, not the 0.8-grid pixel snapped back to 1.
+#[test]
+fn pick_at_scale_0_8_matches_the_native_buffer_the_effect_renders() {
+    let mut s = session();
+    let (name, m) = rendered_matte_of_pick(&mut s, 2.2, 1.5, 0.8);
+    assert!(m >= 0.5, "picked {name:?}, but the render gives it matte {m} there");
+    assert_eq!(name, COMMA);
+}
+
+/// A half-size proxy renders a buffer at 0.5 layer pixels per pixel even at full resolution:
+/// x = 6.5 lies in buffer pixel 3, which samples layer x = 7 (the `left` / `right` tie).
+#[test]
+fn pick_on_a_proxy_matches_the_proxy_sized_buffer() {
+    let mut s = session();
+    let item = *s.project.items.iter().find(|(_, i)| matches!(i.kind, effectcraft_project::ItemKind::Footage(_))).unwrap().0;
+    s.execute("file.setProxy", json!({"item": item.0, "path": "/renders/crypto_proxy.exr"})).unwrap();
+    let (name, m) = rendered_matte_of_pick(&mut s, 6.5, 1.5, 1.0);
+    assert!(m >= 0.5, "picked {name:?}, but the render gives it matte {m} there");
+    assert_eq!(name, "left");
+}
+
+/// 1920-px footage with `left` up to x = 120 and `right` after it, and a 104-px proxy.
+struct Edge;
+impl FootageSource for Edge {
+    fn frame(&self, _: ItemId, f: &Footage, _: Tick) -> Option<Arc<Image>> {
+        Some(Arc::new(Image::new(f.width, f.height)))
+    }
+    fn aux(&self, _: ItemId, _: &Footage, _: Tick) -> Option<Arc<AuxChannels>> {
+        let (w, h) = (1920usize, 40usize);
+        let mut aux = AuxChannels::new(w as u32, h as u32, 1.0);
+        let ids = (0..w * h).map(|i| crypto_float(crypto_hash(if i % w < 120 { "left" } else { "right" }))).collect();
+        aux.channels = vec![("CryptoObject00.R".into(), ids), ("CryptoObject00.G".into(), vec![1.0; w * h])];
+        aux.manifests = vec![("CryptoObject".into(), ["left", "right"].iter().map(|n| (n.to_string(), crypto_hash(n))).collect())];
+        Some(Arc::new(aux))
+    }
+}
+
+/// Proxy buffer pixel 6's centre maps to layer x = 6.5 / (104 / 1920): 120.0 by division, but
+/// 119.99999999999999 by the reciprocal the effect multiplies with. The pick must agree.
+#[test]
+fn pick_maps_pixel_centres_bit_exactly_as_the_effect() {
+    let mut s = Session { footage: Arc::new(Edge), ..Default::default() };
+    let at = |path: &str, width| Footage {
+        path: path.into(),
+        kind: FootageKind::Video,
+        width,
+        height: 40,
+        has_video: true,
+        frame_rate: FrameRate::from_f64(24.0),
+        duration: Tick::from_seconds_f64(2.0),
+        ..Default::default()
+    };
+    s.importer = Some(Arc::new(EdgeProbe(at("/renders/edge.exr", 1920), at("/renders/edge_proxy.exr", 104))));
+    let item = s.execute("file.import", json!({"paths": ["/renders/edge.exr"]})).unwrap()["items"][0].clone();
+    s.execute("comp.new", json!({"name": "C", "width": 1920, "height": 40, "frameRate": 24, "duration": 2})).unwrap();
+    s.execute("layer.addItem", json!({"item": item})).unwrap();
+    s.execute_checked("effect.apply", json!({"effect": "Cryptomatte"})).unwrap();
+    s.execute("file.setProxy", json!({"item": item, "path": "/renders/edge_proxy.exr"})).unwrap();
+    let (name, m) = rendered_matte_of_pick(&mut s, 118.0, 5.0, 1.0);
+    assert_eq!((name.as_str(), m), ("left", 1.0));
+}
+
+struct EdgeProbe(Footage, Footage);
+impl crate::Importer for EdgeProbe {
+    fn probe(&self, path: &str) -> Result<Footage, String> {
+        Ok(if path.contains("proxy") { self.1.clone() } else { self.0.clone() })
+    }
+}
+
+/// Footage whose decoded frames are `num / den` of the probed size (a file re-rendered at another
+/// resolution, a relinked file): the render stretches them over the layer.
+struct OffNominal(u32, u32);
+impl FootageSource for OffNominal {
+    fn frame(&self, _: ItemId, f: &Footage, _: Tick) -> Option<Arc<Image>> {
+        Some(Arc::new(Image::new(f.width * self.0 / self.1, f.height * self.0 / self.1)))
+    }
+    fn aux(&self, _: ItemId, _: &Footage, t: Tick) -> Option<Arc<AuxChannels>> {
+        Some(Arc::new(aux_at(t)))
+    }
+}
+
+/// Points along rows `ys` where the picked ID isn't lit in the rendered matte under the point.
+fn mismatches(s: &mut Session, scales: &[f64], xs: impl Iterator<Item = f64> + Clone, ys: &[f64]) -> Vec<String> {
+    let mut bad = vec![];
+    for &scale in scales {
+        for (x, &y) in ys.iter().flat_map(|y| xs.clone().map(move |x| (x, y))) {
+            if s.execute("effect.cryptomatteAt", json!({"effect": "Cryptomatte", "x": x, "y": y, "scale": scale})).unwrap().is_null() {
+                continue;
+            }
+            let (name, m) = rendered_matte_of_pick(s, x, y, scale);
+            if m < 0.5 {
+                bad.push(format!("scale {scale} ({x:.2}, {y}): picked {name:?}, matte {m}"));
+            }
+        }
+    }
+    bad
+}
+
+const PREVIEW_SCALES: [f64; 7] = [1.0, 0.8, 0.75, 0.74, 0.5, 0.33, 0.25];
+
+/// The pick follows the decoded frame's real size, not the footage's nominal one.
+#[test]
+fn pick_matches_the_render_when_frames_decode_off_nominal_size() {
+    for (num, den) in [(2, 1), (1, 2), (3, 4)] {
+        let mut s = Session { footage: Arc::new(OffNominal(num, den)), importer: Some(Arc::new(Probe)), ..Default::default() };
+        let item = s.execute("file.import", json!({"paths": ["/renders/crypto.exr"]})).unwrap()["items"][0].clone();
+        s.execute("comp.new", json!({"name": "C", "width": 8, "height": 4, "frameRate": 24, "duration": 2})).unwrap();
+        s.execute("layer.addItem", json!({"item": item})).unwrap();
+        s.execute_checked("effect.apply", json!({"effect": "Cryptomatte"})).unwrap();
+        let bad = mismatches(&mut s, &PREVIEW_SCALES, (0..80).map(|i| i as f64 * 0.1 + 0.05), &[0.3, 1.7, 2.6]);
+        assert!(bad.is_empty(), "decode {num}/{den}: {} mismatches:\n{}", bad.len(), bad.join("\n"));
+    }
+}
+
+/// A precomp of a 3D comp, with and without Preserve Resolution (drawn at full size below full
+/// resolution), behind a disabled effect: the pick names the ID the rendered matte shows.
+#[test]
+fn pick_matches_the_render_on_precomps_with_and_without_preserve_resolution() {
+    for preserve in [false, true] {
+        let mut s = Session::default();
+        s.execute("comp.new", json!({"name": "Outer", "width": 40, "height": 20, "frameRate": 24, "duration": 2})).unwrap();
+        let a = s.execute("layer.newSolid", json!({"name": "A", "width": 40, "height": 20})).unwrap()["layer"].clone();
+        let b = s.execute("layer.newSolid", json!({"name": "B", "width": 7, "height": 20})).unwrap()["layer"].clone();
+        s.execute_checked("prop.set", json!({"layer": b, "path": "transform/position", "value": [3.5, 10, -10]})).unwrap();
+        s.execute("layer.setSwitch", json!({"layers": [a, b], "switch": "threeD", "value": true})).unwrap();
+        s.execute("layer.precompose", json!({"layers": [a, b], "name": "Inner"})).unwrap();
+        let inner = *s.project.items.iter().find(|(_, i)| i.name == "Inner").unwrap().0;
+        s.execute_checked("comp.settings", json!({"comp": inner.0, "preserveResolution": preserve})).unwrap();
+        s.execute("layer.select", json!({"layers": [s.active_comp().unwrap().layers[0].id.0]})).ok();
+        s.execute_checked("effect.apply", json!({"effect": "Gaussian Blur"})).unwrap();
+        s.execute_checked("effect.toggle", json!({"effect": 1, "value": false})).unwrap();
+        s.execute_checked("effect.apply", json!({"effect": "Cryptomatte"})).unwrap();
+        let bad = mismatches(&mut s, &PREVIEW_SCALES, (0..93).map(|i| i as f64 * 0.15 + 0.05), &[10.0]);
+        assert!(bad.is_empty(), "preserve {preserve}: {} mismatches:\n{}", bad.len(), bad.join("\n"));
+    }
 }

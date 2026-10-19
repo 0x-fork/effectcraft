@@ -212,7 +212,8 @@ impl CryptoHit {
 
 /// The ID under `{x, y}` (effect space, which is layer space on footage and precomp layers) for
 /// the Cryptomatte effect `{layer?, effect?}`, from the aux channels its render reads. The point
-/// snaps to the centre of the pixel a render at `scale` (the viewer's resolution) samples.
+/// snaps to the centre of the pixel the effect's input buffer samples in a render at `scale`
+/// (the viewer's resolution).
 fn crypto_hit(s: &Session, p: &Value, cmd: &str) -> Result<Option<CryptoHit>> {
     let (cid, lid, fx_uid) = find_fx(s, p, cmd)?;
     let (Some(x), Some(y)) = (f_p(p, "x"), f_p(p, "y")) else { return Err(bad(cmd, "missing `x` / `y` (layer pixels)")) };
@@ -222,23 +223,32 @@ fn crypto_hit(s: &Session, p: &Value, cmd: &str) -> Result<Option<CryptoHit>> {
     }
     let comp = s.project.comp(cid).ok_or(EngineError::NoComp)?;
     let layer = comp.layer(lid).ok_or(EngineError::NoComp)?;
-    let g = layer.effects().and_then(|fx| fx.groups().find(|g| g.uid == fx_uid)).ok_or_else(|| bad(cmd, "no such effect"))?;
+    let fx = layer.effects().ok_or_else(|| bad(cmd, "no effects"))?;
+    let pos = fx.groups().position(|g| g.uid == fx_uid).ok_or_else(|| bad(cmd, "no such effect"))?;
+    let g = fx.groups().nth(pos).ok_or_else(|| bad(cmd, "no such effect"))?;
     let prop = g.prop("selection").filter(|_| g.match_id == "ec.3d.cryptomatte").ok_or_else(|| bad(cmd, "not a Cryptomatte effect"))?;
     let t = super::time_p(s, p, Some(comp));
     let ctx = effectcraft_render::EvalCtx { project: &s.project, comp_id: cid, comp, time: t, expr: s.expr.as_deref(), footage: None };
     let params = effectcraft_effects::flatten_params(g, &mut |pr| ctx.value(layer, pr));
-    let aux = s.renderer(effectcraft_render::RenderOpts { scale, ..Default::default() }).layer_aux(&ctx, layer);
+    let r = s.renderer(effectcraft_render::RenderOpts { scale, ..Default::default() });
+    let aux = r.layer_aux(&ctx, layer);
     let want = effectcraft_effects::CRYPTO_LAYERS.get(params.e("layer") as usize).copied().unwrap_or("CryptoAsset");
     let Some((aux, layer_name)) = aux.and_then(|a| a.resolve_crypto_layer(want).map(|l| (a, l))) else {
         return Err(bad(cmd, "this layer has no Cryptomatte channels (a multi-layer OpenEXR with Cryptomatte, or a 3D precomp)"));
     };
-    let snap = |v: f64| ((v * scale).floor() + 0.5) / scale;
-    let Some(hash) = aux.index_at(snap(x), snap(y)).and_then(|i| aux.crypto_id_at(&layer_name, i)) else { return Ok(None) };
+    // The grid of the effect's input buffer (footage keeps native pixels from 3/4 scale up,
+    // proxies have their own size, earlier effects can pad it), rendered and cached.
+    let b = r.layer_input(&ctx, layer, pos).ok_or_else(|| bad(cmd, "this layer has no pixels"))?;
+    let (bs, o) = (b.scale, b.offset);
+    // The centre of its pixel under the point, at the aux point the effect reads there.
+    let [ax, ay] = effectcraft_effects::aux_point(bs, o, [(x * bs + o[0]).floor() + 0.5, (y * bs + o[1]).floor() + 0.5]);
+    let Some(hash) = aux.index_at(ax, ay).and_then(|i| aux.crypto_id_at(&layer_name, i)) else { return Ok(None) };
     let (selection, driven) = (params.s("selection").to_string(), prop.expr.as_ref().is_some_and(|e| e.enabled));
     Ok(Some(CryptoHit { at: (cid, lid, t), aux, layer: layer_name, hash, selection, prop: prop.uid, driven }))
 }
 
-/// `effect.cryptomatteAt`: the ID under a point, for the viewer's hover hint.
+/// `effect.cryptomatteAt`: the ID under a point, for the viewer's hover hint. The first call per
+/// frame renders the effect's input to learn its pixel grid (cached afterwards).
 fn crypto_at(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(crypto_hit(s, p, "effect.cryptomatteAt")?.map_or(Value::Null, |h| h.reply(&h.selection)))
 }
