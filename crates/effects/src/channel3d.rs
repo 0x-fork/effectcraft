@@ -326,7 +326,7 @@ fn wild(pat: &str, name: &str) -> bool {
 /// Split a selection at its commas. A name in double or single quotes stays whole, commas
 /// included (Blender allows `Green, Glossy`), and a backslash takes the next character
 /// literally (`Green\, Glossy`, `\"`). Unquoted text is trimmed; the quotes are dropped.
-fn selection_names(sel: &str) -> Vec<String> {
+pub(crate) fn selection_names(sel: &str) -> Vec<String> {
     let mut out = vec![];
     let mut cur = String::new();
     let mut quote: Option<char> = None;
