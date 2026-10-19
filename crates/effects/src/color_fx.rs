@@ -343,6 +343,33 @@ pub fn mirror_pow(v: f32, p: f32) -> f32 {
 /// It used to offset the luminance by the HSL saturation, which is near 1 for any tinted
 /// near-black pixel: the faint colour noise of compressed footage's shadows came out as bright
 /// and black blocks (#1463), and 32-bpc overbrights divided by zero.
+/// Black & White's Tint: the tint colour's hue and saturation at the gray's luminosity, as a
+/// Color blend does (luminosity with weights 0.3 / 0.59 / 0.11, out-of-range channels pulled
+/// back toward the gray). After Effects 2026 with Tint Color [1, 0.5, 0]: gray 0.1 (a red solid
+/// at Reds 10, case 717) → (43, 21, 0), gray 0.6 (yellow at defaults, case 825) → (255, 129, 2),
+/// white → white; the old hue / saturation / lightness mix gave (51, 26, 0) for the first.
+pub fn bw_tint(tint: [f32; 3], gray: f32) -> [f32; 3] {
+    let lum = |c: [f32; 3]| 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+    if !gray.is_finite() || gray <= 0.0 {
+        return [0.0; 3];
+    }
+    if gray >= 1.0 {
+        return [gray; 3];
+    }
+    let d = gray - lum(tint);
+    let c = tint.map(|v| v + d);
+    let l = lum(c);
+    let (n, x) = (c[0].min(c[1]).min(c[2]), c[0].max(c[1]).max(c[2]));
+    let mut o = c;
+    if n < 0.0 && l - n > 1e-9 {
+        o = o.map(|v| l + (v - l) * l / (l - n));
+    }
+    if x > 1.0 && x - l > 1e-9 {
+        o = o.map(|v| l + (v - l) * (1.0 - l) / (x - l));
+    }
+    o
+}
+
 fn black_white(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let w = [ctx.params.f("reds"), ctx.params.f("yellows"), ctx.params.f("greens"), ctx.params.f("cyans"), ctx.params.f("blues"), ctx.params.f("magentas")]
         .map(|v| v as f32 / 100.0);
@@ -357,13 +384,7 @@ fn black_white(ctx: &EffectCtx, mut b: Buf) -> Buf {
         let wt = w[i] + (w[(i + 1) % 6] - w[i]) * f;
         let (max, min) = (c[0].max(c[1]).max(c[2]), c[0].min(c[1]).min(c[2]));
         let gray = (min + (max - min) * wt).max(0.0);
-        if tint_on {
-            let (th, ts, _) = rgb_to_hsl(tc[0], tc[1], tc[2]);
-            let (r, g, bl) = hsl_to_rgb(th, ts, gray.min(1.0));
-            [r, g, bl]
-        } else {
-            [gray, gray, gray]
-        }
+        if tint_on { bw_tint([tc[0], tc[1], tc[2]], gray) } else { [gray, gray, gray] }
     });
     b
 }
@@ -1248,9 +1269,6 @@ mod tests {
         assert!(go(0.0, 100.0, 64) >= 30);
     }
 
-    /// #1463: Black & White's sliders set the gray of each pure hue and blend between
-    /// neighbouring hues; neutral pixels keep their value, overbright ones too, and an overbright
-    /// colour stays finite (it used to divide by zero).
     /// After Effects 2026: Tritone Highlights [1, 1, 0.8], Midtones [0.6, 0.2, 0.2], Shadows
     /// [0, 0, 0.3]. On a red solid with Blend With Original 25 (case 718) AE gives (132, 23, 46);
     /// on a grey ramp (case 815) levels 0, 63.9, 127.6, 191.4 give (0, 0, 77), (77, 26, 64),
@@ -1274,6 +1292,29 @@ mod tests {
         }
     }
 
+    /// After Effects 2026, Tint Color [1, 0.5, 0]: a red solid at Reds 10 (case 717) and yellow
+    /// and white solids at the default sliders (case 825).
+    #[test]
+    fn black_white_tint_matches_after_effects() {
+        let tint = [("tint", Value::Bool(true)), ("tintColor", Value::Color([1.0, 0.5, 0.0, 1.0]))];
+        let near = |o: [f32; 4], ae: [f32; 3]| (0..3).all(|i| (o[i] * 255.0 - ae[i]).abs() <= 1.5);
+        let mut reds = tint.to_vec();
+        reds.push(("reds", num(10.0)));
+        let o = px("ec.color.blackwhite", &reds, [1.0, 0.0, 0.0, 1.0]);
+        assert!(near(o, [43.0, 21.0, 0.0]), "{:?}", o.map(|v| v * 255.0));
+        let o = px("ec.color.blackwhite", &tint, [1.0, 1.0, 0.0, 1.0]);
+        assert!(near(o, [255.0, 129.0, 2.0]), "{:?}", o.map(|v| v * 255.0));
+        let o = px("ec.color.blackwhite", &tint, [1.0, 1.0, 1.0, 1.0]);
+        assert!(near(o, [255.0, 255.0, 255.0]), "{:?}", o.map(|v| v * 255.0));
+        // Hostile grays stay finite.
+        for g in [f32::NAN, -1.0, 0.0, 4.0] {
+            assert!(bw_tint([1.0, 0.5, 0.0], g).iter().all(|v| v.is_finite()));
+        }
+    }
+
+    /// #1463: Black & White's sliders set the gray of each pure hue and blend between
+    /// neighbouring hues; neutral pixels keep their value, overbright ones too, and an overbright
+    /// colour stays finite (it used to divide by zero).
     #[test]
     fn black_white_sliders_set_the_gray_of_each_hue() {
         let bw = |vals: &[(&str, Value)], c: [f32; 3]| px("ec.color.blackwhite", vals, [c[0], c[1], c[2], 1.0]);
