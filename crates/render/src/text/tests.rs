@@ -524,6 +524,7 @@ fn touching_glyphs_join_without_a_seam() {
             fill,
             stroke: [0.0; 4],
             stroke_width: 0.0,
+            bold: 0.0,
             apply_fill: true,
             char_index: 0,
             rest: [0.0; 2],
@@ -549,6 +550,36 @@ fn touching_glyphs_join_without_a_seam() {
     assert!((two[3] - 0.75).abs() < 0.02, "{two:?}");
     let multiply = draw(vec![glyph(4.0, 10.5, white, false), glyph(10.5, 17.0, white, false)], BlendMode::Multiply).get(10, 10);
     assert!(multiply[3] < 0.9, "{multiply:?}");
+}
+
+/// #1676: Faux Bold, and the synthetic bold of a style the family has no face for, are drawn.
+#[test]
+fn faux_bold_and_synthetic_bold_thicken_the_glyphs() {
+    // Total alpha and the alpha bounding box of a rendered word.
+    let ink = |d: TextDoc| {
+        let (mut p, cid, comp) = setup(400, 120);
+        let mut l = text_layer(&mut p, &comp, TextDoc { text: "Hamburg".into(), size: 60.0, ..d });
+        set(&mut l, "transform/position", Value::Vec3([40.0, 85.0, 0.0]));
+        p.comp_mut(cid).unwrap().layers.push(l);
+        let img = crate::render_frame(&p, cid, Tick::ZERO, 1.0);
+        (img.data.iter().map(|px| px[3]).sum::<f32>(), alpha_bbox(&img).unwrap())
+    };
+    let (plain, pb) = ink(TextDoc::default());
+    let (bold, bb) = ink(TextDoc { faux_bold: true, ..Default::default() });
+    assert!(bold > plain * 1.15, "faux bold adds ink: {plain} → {bold}");
+    // 0.03 em = 1.8 px on every side.
+    let grow = (bb[2] - bb[0]) - (pb[2] - pb[0]);
+    assert!((3..=6).contains(&grow), "and widens the word by about 3.6 px: {pb:?} → {bb:?}");
+    // Bundled Inter has no Bold Italic face: the italic face is drawn with synthetic bold.
+    let (italic, _) = ink(TextDoc { style: "Italic".into(), ..Default::default() });
+    let (bold_italic, _) = ink(TextDoc { style: "Bold Italic".into(), ..Default::default() });
+    assert!(bold_italic > italic * 1.15, "Bold Italic is bolder than Italic: {italic} → {bold_italic}");
+    // A stroke follows the bold outline: as wide as before, moved out with it.
+    let stroked = TextDoc { apply_fill: false, apply_stroke: true, stroke: [1.0; 4], stroke_width: 4.0, ..Default::default() };
+    let (ring, rb) = ink(stroked.clone());
+    let (bold_ring, brb) = ink(TextDoc { faux_bold: true, ..stroked });
+    assert!(bold_ring > ring * 0.95 && bold_ring < ring * 1.3, "the stroke keeps its width: {ring} → {bold_ring}");
+    assert!(brb[0] < rb[0] && brb[2] > rb[2], "{rb:?} → {brb:?}");
 }
 
 /// #1011: what dragging a Range Selector bar to fraction `f` of the text writes.
