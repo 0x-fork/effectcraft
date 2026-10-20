@@ -595,6 +595,11 @@ fn stills_at_reduced_sizes_are_resampled_once() {
     let f = probe(&p).expect("probe");
     let pool = MediaPool::new();
     let full = pool.frame(ItemId(1), &f, Tick::ZERO).expect("frame");
+    // At its own size it is the unsized frame: no second decode, no second full-size copy.
+    let misses = pool.stats().misses;
+    let native = pool.frame_at_size(ItemId(1), &f, Tick::ZERO, f.width, f.height).expect("frame");
+    assert!(Arc::ptr_eq(&full, &native), "the native size reuses the unsized frame");
+    assert_eq!(pool.stats().misses, misses);
     for (w, h) in [(306, 48), (153, 24), (77, 12)] {
         let sized = pool.frame_at_size(ItemId(1), &f, Tick::ZERO, w, h).expect("frame");
         assert_eq!(*sized, effectcraft_raster::resample(&full, w, h), "{w}×{h}: the renderer's resample");

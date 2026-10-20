@@ -716,7 +716,8 @@ impl Inner {
         }
         let mut loc = Self::locate(footage, t, float);
         let movie = loc.media_t.is_some();
-        if let Some(size) = size {
+        // A still asked for at its own size is the unsized frame (one decode, one entry).
+        if let Some(size) = size.filter(|s| movie || *s != (footage.width, footage.height)) {
             loc.key.size = size;
         }
         let mut c = lock(&self.cache);
