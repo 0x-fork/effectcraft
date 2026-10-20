@@ -39,7 +39,13 @@ impl Rgba {
     /// `#rrggbb` or `#rrggbbaa`.
     pub fn from_hex(s: &str) -> Option<Rgba> {
         let s = s.trim().trim_start_matches('#');
-        let p = |i: usize| u8::from_str_radix(s.get(i..i + 2)?, 16).ok();
+        let p = |i: usize| {
+            let pair = s.get(i..i + 2)?;
+            if !pair.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            u8::from_str_radix(pair, 16).ok()
+        };
         match s.len() {
             6 => Some(Rgba::from_u8(p(0)?, p(2)?, p(4)?)),
             8 => Some(Rgba { a: p(6)? as f32 / 255.0, ..Rgba::from_u8(p(0)?, p(2)?, p(4)?) }),
@@ -260,6 +266,14 @@ mod tests {
     fn hsv_to_rgb_tiny_negative_hue_is_red() {
         let (r, g, b) = hsv_to_rgb(-1e-9, 1.0, 1.0);
         assert!(r > 0.99 && g < 0.01 && b < 0.01, "{r} {g} {b}");
+    }
+
+    #[test]
+    fn rejects_signed_hex_pairs() {
+        assert!(Rgba::from_hex("#+1+2+3").is_none());
+        assert!(Rgba::from_hex("#1+2+3+").is_none());
+        assert!(Rgba::from_hex("#ff00+0ff").is_none());
+        assert!(Rgba::from_hex("#a1B2c3").is_some());
     }
 
     #[test]
