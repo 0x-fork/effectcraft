@@ -22,7 +22,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 use effectcraft_effects::Buf;
-use effectcraft_project::{ItemKind, Layer, LayerSource, Node, PropGroup};
+use effectcraft_project::{FootageKind, ItemKind, Layer, LayerSource, Node, PropGroup};
 
 use crate::eval::EvalCtx;
 
@@ -481,7 +481,7 @@ fn hash_values(h: &mut KeyHasher, ctx: &EvalCtx, layer: &Layer, g: &PropGroup) {
 }
 
 /// Cache key for the processed (source → masks → effects) buffer of `layer` at the context
-/// time, or `None` when the layer must not be cached (footage, precomps, cameras, adjustment
+/// time, or `None` when the layer must not be cached (movie footage, precomps, cameras, adjustment
 /// layers…).
 pub fn layer_key(ctx: &EvalCtx, layer: &Layer, scale: f64, draft: bool, blur: bool) -> Option<u64> {
     // Time effects see property values at other times. Keyframes are part of the hashed
@@ -512,6 +512,13 @@ fn reads_other_times(layer: &Layer) -> bool {
         && layer.effects().is_some_and(|fx| {
             fx.groups().any(|g| g.enabled && matches!(&g.kind, effectcraft_project::GroupKind::Effect { effect } if effect.starts_with("ec.time.")))
         })
+}
+
+/// A still image (no proxy): its layer is cached like a text or shape layer, so the GPU
+/// compositor uploads it once, not every frame (#1812: four 21120 px plates re-uploaded by every
+/// preview worker ran the GPU out of memory). Movies and sequences stay in the media pool only.
+fn still_footage(ctx: &EvalCtx, item: effectcraft_project::ItemId) -> bool {
+    ctx.project.item(item).is_some_and(|it| it.proxy.is_none() && matches!(&it.kind, ItemKind::Footage(f) if f.kind == FootageKind::Still))
 }
 
 fn has_expression(g: &PropGroup) -> bool {
@@ -552,14 +559,17 @@ fn key_any(ctx: &EvalCtx, layer: &Layer, scale: f64, draft: bool, blur: bool, fo
             hash_debug(&mut h, s);
         }
         LayerSource::Text | LayerSource::Shape => {}
-        LayerSource::Footage { item } if footage => {
+        LayerSource::Footage { item } if footage || still_footage(ctx, *item) => {
             let it = ctx.project.item(*item)?;
             let ItemKind::Footage(f) = &it.kind else { return None };
             hash_debug(&mut h, f);
             // A proxy (and its Use Proxy switch) changes the pixels.
             hash_debug(&mut h, &it.proxy);
             item.hash(&mut h);
-            ctx.source_time(layer).0.hash(&mut h);
+            // A still is the same at every time (unless a proxy, which may be a movie, stands in).
+            if f.kind != FootageKind::Still || it.proxy.is_some() {
+                ctx.source_time(layer).0.hash(&mut h);
+            }
             // Frame blending mixes neighbouring source frames.
             ctx.comp.enable_frame_blending.hash(&mut h);
         }
