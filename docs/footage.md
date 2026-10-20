@@ -70,6 +70,16 @@ next to it.
 Agents: `file.importProject {"path": "/projects/titles.ecproj"}` returns the comps, the root comps,
 `primaryComp` (the only root comp, if there is one) and any missing media.
 
+## Finding a layer's source in the Project panel
+
+Right-click a layer in the Timeline or Composition panel and choose **Reveal Layer Source in
+Project** (also Layer ▸ Reveal ▸ Reveal Layer Source in Project). The Project panel opens, its
+search is cleared, the folders holding the source open, and the source item is selected.
+
+Layers whose image is generated inside the composition — text, shape, null, camera, light and
+3D primitive layers — have no Project item, so the command is not offered for them. Adjustment
+layers do have one: the solid that backs them.
+
 ## Interpret Footage
 
 Select a footage item in the Project panel and choose **File ▸ Interpret Footage ▸ Main…**

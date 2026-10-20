@@ -224,6 +224,11 @@ fn focused_row_id() -> egui::Id {
     egui::Id::new("project-focused-row")
 }
 
+/// The item whose selection the panel last scrolled into view.
+fn selection_seen_id() -> egui::Id {
+    egui::Id::new("proj-sel-seen")
+}
+
 /// The focused widget is one of the panel's rows, or nothing has keyboard focus: the panel's keys
 /// apply. Any other focused widget (a text field, a button reached with Tab) keeps them.
 fn keys_reach_rows(app: &EffectcraftApp, ctx: &egui::Context) -> bool {
@@ -345,6 +350,33 @@ pub(crate) fn visible_rows(app: &EffectcraftApp) -> Vec<(ItemId, usize)> {
     let mut rows = vec![];
     walk(app, None, 0, &app.ui.project_search.to_lowercase(), &mut rows);
     rows
+}
+
+/// Bring `items` into view: clear the panel's search, open every folder holding them, select
+/// them, and show and focus the Project panel. Used by Reveal Layer Source in Project and
+/// Reveal Composition in Project, so the item is visible even in a large, filtered project.
+pub(crate) fn reveal(app: &mut EffectcraftApp, ctx: &egui::Context, items: &[ItemId]) {
+    let items: Vec<ItemId> = items.iter().copied().filter(|item| app.session.project.item(*item).is_some()).collect();
+    if items.is_empty() {
+        return;
+    }
+    for item in &items {
+        let mut parent = app.session.project.item(*item).and_then(|item| item.parent);
+        let mut depth = 0;
+        while let Some(folder) = parent {
+            app.ui.project_open_folders.insert(folder.0);
+            parent = app.session.project.item(folder).and_then(|item| item.parent);
+            depth += 1;
+            if depth > 256 {
+                break;
+            }
+        }
+    }
+    app.ui.project_search.clear();
+    app.session.state.project_selection = items;
+    // Force the panel's selection scroll on its next draw, even when the item was already selected.
+    ctx.data_mut(|d| d.remove_temp::<Option<u64>>(selection_seen_id()));
+    app.show_panel(crate::dock::PanelKind::Project);
 }
 
 pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
@@ -562,7 +594,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         }
     }
     // A selection made elsewhere (a command, an agent, the viewer) scrolls into view.
-    let sel_key = egui::Id::new("proj-sel-seen");
+    let sel_key = selection_seen_id();
     let sel_now = app.session.state.project_selection.last().map(|i| i.0);
     if ctx.data(|d| d.get_temp::<Option<u64>>(sel_key)) != Some(sel_now) {
         ctx.data_mut(|d| d.insert_temp(sel_key, sel_now));

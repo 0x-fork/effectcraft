@@ -3883,18 +3883,25 @@ fn collapse_applies(layer: &Layer, project: &effectcraft_engine::project::Projec
     }
 }
 
-/// Which Create ▸ conversions the layer context menu offers, from the targeted layer's kind.
+/// Which Create ▸ conversions and Reveal ▸ actions the layer context menu offers, from the
+/// targeted layer's kind.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct LayerMenuCaps {
     /// SVG / PDF / AI / EPS footage: Create Shapes from Vector Layer.
     pub vector: bool,
     /// A text layer: Create Shapes from Text / Create Masks from Text.
     pub text: bool,
+    /// The layer has a source item to reveal in the Project panel.
+    pub source: bool,
 }
 
 impl LayerMenuCaps {
     pub(crate) fn of(project: &effectcraft_engine::project::Project, layer: &Layer) -> Self {
-        Self { vector: vector_footage_layer(project, layer), text: matches!(layer.source, LayerSource::Text) }
+        Self {
+            vector: vector_footage_layer(project, layer),
+            text: matches!(layer.source, LayerSource::Text),
+            source: layer.source.item().is_some_and(|item| project.item(item).is_some()),
+        }
     }
 }
 
@@ -3916,6 +3923,10 @@ fn layer_context_menu(
         actions.push(("layer.select".into(), json!({"layers": [layer.id.0]})));
     }
     let targets: Vec<u64> = if in_selection { comp.layers.iter().filter(|l| selected.contains(&l.id)).map(|l| l.id.0).collect() } else { vec![layer.id.0] };
+    // The menu acts on the whole selection: offer Reveal when any target has a source, even if
+    // the layer under the pointer is a text, shape or null layer.
+    let any_source = targets.iter().any(|id| comp.layer(LayerId(*id)).is_some_and(|l| l.source.item().is_some()));
+    let caps = LayerMenuCaps { source: caps.source || any_source, ..caps };
     crate::widgets::context_menu(resp, |ui| layer_menu(ui, &targets, caps, (auto, "timeline.layerMenu"), actions));
 }
 
@@ -3951,6 +3962,9 @@ pub(crate) fn layer_menu(
         item(ui, "Adjustment Layer", "layer.newAdjustment", json!({}));
     });
     item(ui, "Layer Settings…", "layer.settings", json!({}));
+    if caps.source {
+        item(ui, "Reveal Layer Source in Project", "layer.revealSource", json!({"layers": layers}));
+    }
     if caps.vector {
         item(ui, "Create Shapes from Vector Layer", "layer.create", json!({"op": "shapesFromVector", "layers": layers}));
     }
@@ -4656,20 +4670,21 @@ mod tests {
     /// the categories the Effect menu does; the actions it records stay the same.
     #[test]
     fn the_layer_context_menu_draws_in_the_interface_language() {
-        let caps = LayerMenuCaps { vector: true, text: false };
+        let caps = LayerMenuCaps { vector: true, text: false, source: true };
         let (mut auto, mut actions) = (crate::automation::Registry::default(), Vec::new());
         crate::i18n::set_current("zh-hans");
         let menu = drawn_text(|ui| layer_menu(ui, &[7], caps, (&mut auto, "t"), &mut actions));
         let effects = drawn_text(|ui| effects_submenu(ui, &[7], &mut |_: &mut egui::Ui, _: &str, _: &str, _: serde_json::Value| {}));
         crate::i18n::set_current("en");
         let english = drawn_text(|ui| layer_menu(ui, &[7], caps, (&mut auto, "t"), &mut actions));
-        for label in ["新建", "图层设置...", "从矢量图层创建形状", "预合成...", "重复", "拆分图层", "删除"] {
+        for label in ["新建", "图层设置...", "在项目中显示图层源", "从矢量图层创建形状", "预合成...", "重复", "拆分图层", "删除"]
+        {
             assert!(menu.iter().any(|t| t == label), "{label} missing from {menu:?}");
         }
         assert!(!menu.iter().any(|t| t.is_ascii()), "English left in {menu:?}");
         assert!(effects.iter().any(|t| t == "模糊和锐化"), "{effects:?}");
         assert!(!effects.iter().any(|t| t == "Blur & Sharpen"), "{effects:?}");
-        for label in ["Layer Settings…", "Duplicate", "Delete"] {
+        for label in ["Layer Settings…", "Reveal Layer Source in Project", "Duplicate", "Delete"] {
             assert!(english.iter().any(|t| t == label), "{label} missing from {english:?}");
         }
         assert!(actions.is_empty());
