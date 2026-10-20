@@ -8,7 +8,7 @@
 
 use effectcraft_engine::color::BlendMode;
 use effectcraft_engine::keyframe::{Interp, Value};
-use effectcraft_engine::project::{Comp, GroupKind, ItemId, Layer, LayerId, LayerSource, MatteKind, Node, ParamUi, PropGroup, Property};
+use effectcraft_engine::project::{Comp, FootageKind, GroupKind, ItemId, ItemKind, Layer, LayerId, LayerSource, MatteKind, Node, ParamUi, PropGroup, Property};
 use effectcraft_engine::render::EvalCtx;
 use effectcraft_engine::time::Tick;
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
@@ -1380,6 +1380,26 @@ fn insertion(layer_rows: &[(Rect, LayerId)], py: f32, top: f32) -> (Option<usize
 
 fn layer_drop_id() -> egui::Id {
     egui::Id::new("tl-layer-drop")
+}
+
+/// Whether a Project item can replace a layer's source (the same set `layer.replaceSource`
+/// accepts): compositions, footage and solids; not folders, data files or 3D models.
+fn replaceable_item(it: &effectcraft_engine::project::Item) -> bool {
+    match &it.kind {
+        ItemKind::Comp(_) | ItemKind::Solid(_) => true,
+        ItemKind::Footage(f) => !matches!(f.kind, FootageKind::Data | FootageKind::Model),
+        ItemKind::Folder => false,
+    }
+}
+
+/// The Alt/Option-drag target: the layer under the pointer can take this item as its source, and
+/// the item wouldn't put the composition inside itself.
+fn replace_source_target(app: &EffectcraftApp, cid: ItemId, item: ItemId, lid: LayerId, comp: &Comp) -> bool {
+    app.session.project.item(item).is_some_and(replaceable_item)
+        && !app.session.project.comp_contains(item, cid)
+        && comp
+            .layer(lid)
+            .is_some_and(|l| !l.switches.locked && matches!(l.source, LayerSource::Footage { .. } | LayerSource::Comp { .. } | LayerSource::Solid { .. }))
 }
 
 pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
@@ -3356,7 +3376,27 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         && let Some(ptr) = ctx.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(rows_rect))
     {
         let released = ctx.input(|i| i.pointer.any_released());
-        if matches!(payload.as_ref(), crate::panels::DragPayload::Effect(_) | crate::panels::DragPayload::Preset { .. }) {
+        // Alt/Option-drag from the Project panel replaces the source of the layer under the
+        // pointer (After Effects). The shortcut replaces every selected layer instead.
+        let alt_item = ctx.input(|i| i.modifiers.alt) && matches!(payload.as_ref(), crate::panels::DragPayload::Item(_));
+        if alt_item {
+            if let crate::panels::DragPayload::Item(id) = payload.as_ref() {
+                let target = hit_rows.iter().find(|(r, _)| ptr.y >= r.min.y && ptr.y < r.max.y).map(|(_, row)| row.layer);
+                if let Some(l) = target
+                    && replace_source_target(app, cid, ItemId(*id), l, &comp)
+                    && let Some(span) = hit_rows.iter().filter(|(_, row)| row.layer == l).map(|(r, _)| *r).reduce(|a, b| a.union(b))
+                {
+                    let lit = span.intersect(rows_rect);
+                    let rp = p.with_clip_rect(rows_rect);
+                    rp.rect_filled(lit, 0.0, t.accent.gamma_multiply(0.18));
+                    rp.rect_stroke(lit, 0.0, Stroke::new(2.0, t.accent), StrokeKind::Inside);
+                    app.auto.add("timeline.replaceSourceTarget", lit, "Replace the layer's source");
+                    if released {
+                        actions.push(("layer.replaceSource".into(), json!({"layers": [l.0], "item": *id, "fixExpressions": false})));
+                    }
+                }
+            }
+        } else if matches!(payload.as_ref(), crate::panels::DragPayload::Effect(_) | crate::panels::DragPayload::Preset { .. }) {
             let target = hit_rows.iter().find(|(r, _)| ptr.y >= r.min.y && ptr.y < r.max.y).map(|(_, row)| row.layer);
             // The layer the effect would land on (its row and its open properties) is the one
             // that lights up, not the whole timeline.
@@ -4263,6 +4303,26 @@ fn value_editor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Alt/Option-drag takes the same Project items `layer.replaceSource` does: compositions,
+    /// footage and solids, never folders, data files or 3D models.
+    #[test]
+    fn replace_source_takes_visual_items_only() {
+        use effectcraft_engine::color::Label;
+        use effectcraft_engine::project::{Comp, Footage, Project, Solid};
+        use effectcraft_engine::time::{FrameRate, Tick};
+        let mut p = Project::default();
+        let l = Label::None;
+        let comp = p.add_item("C", l, None, ItemKind::Comp(Comp::new(10, 10, FrameRate::FPS_30, Tick::from_seconds_f64(1.0)).into()));
+        let folder = p.add_item("F", l, None, ItemKind::Folder);
+        let still = p.add_item("S", l, None, ItemKind::Footage(Footage { kind: FootageKind::Still, ..Default::default() }));
+        let data = p.add_item("D", l, None, ItemKind::Footage(Footage { kind: FootageKind::Data, ..Default::default() }));
+        let model = p.add_item("M", l, None, ItemKind::Footage(Footage { kind: FootageKind::Model, ..Default::default() }));
+        let solid = p.add_item("So", l, None, ItemKind::Solid(Solid { color: [0.0; 3], width: 10, height: 10, pixel_aspect: 1.0 }));
+        for (id, ok) in [(comp, true), (still, true), (solid, true), (folder, false), (data, false), (model, false)] {
+            assert_eq!(replaceable_item(p.item(id).unwrap()), ok, "{id:?}");
+        }
+    }
 
     /// Alt/Cmd-click twirls Audio's Waveform row (not in the property tree) with the rest.
     #[test]
