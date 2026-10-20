@@ -1589,12 +1589,13 @@ impl<'a> Renderer<'a> {
             t.cached = false;
             t.effects.push(("layerStyles".into(), t0.elapsed().as_secs_f64() * 1e3));
         }
-        let body = Arc::new(st.body);
-        let passes: Vec<_> = st.passes.into_iter().map(|(b, m)| (Arc::new(b), m)).collect();
+        let mut body = Arc::new(st.body);
+        let mut passes: Vec<_> = st.passes.into_iter().map(|(b, m)| (Arc::new(b), m)).collect();
+        // The buffers the cache keeps (another worker's, if it kept them first).
         if let (Some(c), Some(k)) = (self.cache_to_keep(), key) {
-            c.insert(k, body.clone());
-            for (i, (b, _)) in passes.iter().enumerate() {
-                c.insert(cache::derive(k, i as u64 + 1), b.clone());
+            body = c.insert(k, body);
+            for (i, (b, _)) in passes.iter_mut().enumerate() {
+                *b = c.insert(cache::derive(k, i as u64 + 1), b.clone());
             }
         }
         Some(StyledLayer { passes, body, content, key, ckey, plain: false })
