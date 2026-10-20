@@ -610,11 +610,12 @@ fn stills_at_reduced_sizes_are_resampled_once() {
     }
     // Pixels larger than the nominal size (a smart object's) are resampled as the renderer does;
     // smaller ones are left as they are (the renderer scales the layer up instead).
+    // One pool, one file, one requested size: the two decisions don't share a cache entry.
     let larger = Footage { width: 306, height: 48, ..f.clone() };
-    let sized = MediaPool::new().frame_at_size(ItemId(1), &larger, Tick::ZERO, 153, 24).expect("frame");
-    assert_eq!(*sized, effectcraft_raster::resample(&full, 153, 24));
     let smaller = Footage { width: 1226, height: 194, ..f.clone() };
-    let kept = MediaPool::new().frame_at_size(ItemId(1), &smaller, Tick::ZERO, 306, 48).expect("frame");
+    let sized = pool.frame_at_size(ItemId(2), &larger, Tick::ZERO, 153, 24).expect("frame");
+    assert_eq!(*sized, effectcraft_raster::resample(&full, 153, 24));
+    let kept = pool.frame_at_size(ItemId(3), &smaller, Tick::ZERO, 153, 24).expect("frame");
     assert_eq!(*kept, *full);
     let _ = std::fs::remove_dir_all(&dir);
 }

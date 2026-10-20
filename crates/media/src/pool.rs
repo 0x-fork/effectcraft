@@ -45,6 +45,9 @@ struct Key {
     matte: [u32; 3],
     /// A movie frame made at this size for a reduced-resolution render ((0, 0): as decoded).
     size: (u32, u32),
+    /// A still at a reduced `size`: the footage's nominal size, which decides whether it is
+    /// resampled (see `Inner::still_at_size`); (0, 0) otherwise.
+    nominal: (u32, u32),
 }
 
 struct Entry {
@@ -678,7 +681,7 @@ impl Inner {
                 FloatCurve::Gamma24 => 2,
             } << 2);
         let matte = if footage.alpha == AlphaMode::Premultiplied { footage.premul_color.map(f32::to_bits) } else { [0; 3] };
-        let key = |path: &str, frame| Key { path: path.into(), frame, interp, matte, size: (0, 0) };
+        let key = |path: &str, frame| Key { path: path.into(), frame, interp, matte, size: (0, 0), nominal: (0, 0) };
         match footage.kind {
             FootageKind::Sequence if !footage.sequence.is_empty() => {
                 let i = Self::frame_index(footage.frame_rate, t, footage.sequence_frames(), footage.loop_count);
@@ -719,6 +722,9 @@ impl Inner {
         // A still asked for at its own size is the unsized frame (one decode, one entry).
         if let Some(size) = size.filter(|s| movie || *s != (footage.width, footage.height)) {
             loc.key.size = size;
+            if !movie {
+                loc.key.nominal = (footage.width, footage.height);
+            }
         }
         let mut c = lock(&self.cache);
         // sequential playback of a movie: read the next frame ahead
@@ -1074,7 +1080,7 @@ mod tests {
     fn lru_respects_budget_and_recycles() {
         let mut c = Lru::default();
         let img = || Arc::new(Image::new(16, 16)); // 4 KiB + overhead
-        let k = |i| Key { path: "a".into(), frame: i, interp: 0, matte: [0; 3], size: (0, 0) };
+        let k = |i| Key { path: "a".into(), frame: i, interp: 0, matte: [0; 3], size: (0, 0), nominal: (0, 0) };
         let budget = 3 * (4096 + 64);
         for i in 0..10 {
             c.insert(k(i), img(), budget);
