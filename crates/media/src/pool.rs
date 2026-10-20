@@ -774,13 +774,16 @@ impl Inner {
     #[cfg(target_arch = "wasm32")]
     fn prefetch(self: &Arc<Self>, _footage: &Footage, _t: Tick, _size: Option<(u32, u32)>, _float: FloatCurve) {}
 
-    /// A still (image file or sequence frame) of the footage's own size, at `loc.key.size` when
-    /// one is set: resampled as the renderer would ([`FootageSource::frame_at_size`]), so the
-    /// pool keeps the reduced frame and a reduced-resolution render neither decodes nor resamples
-    /// a large still again for every frame (#1812: 21120-px plates at Quarter).
+    /// A still (image file or sequence frame) at `loc.key.size` when one is set: resampled as the
+    /// renderer would ([`FootageSource::frame_at_size`]), so the pool keeps the reduced frame and a
+    /// reduced-resolution render neither decodes nor resamples a large still again for every frame
+    /// (#1812: 21120-px plates at Quarter). Like the renderer's `footage_buf`, an image decoded
+    /// larger than the footage's nominal size (a smart object's pixels) is resampled too, and one
+    /// decoded smaller is not (the renderer scales the layer instead).
     fn still_at_size(img: Image, loc: &Loc, footage: &Footage) -> Image {
         let (w, h) = loc.key.size;
-        if w == 0 || h == 0 || (img.width, img.height) != (footage.width, footage.height) || (w, h) == (img.width, img.height) {
+        let smaller = img.width == 0 || footage.width as f64 / img.width as f64 > 1.0 + 1e-9;
+        if w == 0 || h == 0 || smaller || (w, h) == (img.width, img.height) {
             return img;
         }
         effectcraft_raster::resample(&img, w, h)
