@@ -72,6 +72,8 @@ pub enum Dialog {
     ViewOptions,
     CameraSettings,
     LightSettings,
+    /// Layer ▸ New ▸ 3D Primitive… (`panels::primitive_dialog`).
+    NewPrimitive,
     KeyVelocity,
     KeyInterpolation,
     TimeStretch,
