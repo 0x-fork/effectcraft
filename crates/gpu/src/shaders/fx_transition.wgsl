@@ -582,6 +582,12 @@ fn ftr_blob(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     let cut = P.f[0].x;
+    if (cut >= 1.0) {
+        // Endpoint guard: an opaque source can reach h = 1.0, where the gradient antialias
+        // would otherwise leave a half-covered pixel at Cut Away 100.
+        textureStore(out, p, vec4<f32>(0.0));
+        return;
+    }
     let hv = textureLoad(aux, p, 0).x;
     let g = ftr_grad(p);
     let grad = length(g);

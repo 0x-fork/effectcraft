@@ -123,6 +123,12 @@ fn dot3f(a: [f32; 3], b: [f32; 3]) -> f32 {
 fn cc_blobbylize(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let soft = ctx.params.f("softness").max(0.0) * b.scale;
     let cut = (ctx.params.f("cutAway") / 100.0).clamp(0.0, 1.0) as f32;
+    if cut >= 1.0 {
+        // Endpoint guard: at Cut Away 100 the gradient antialias must not leave a half-covered
+        // pixel where an opaque source reaches exactly 1.0.
+        b.img.data.fill([0.0; 4]);
+        return b;
+    }
     let blob = layer_or_self(ctx, &b, "blobLayer", true, false);
     let prop = src_at(ctx.params.e("property"));
     let raw = Plane::from_image(&blob, |px| {
@@ -1210,6 +1216,15 @@ mod tests {
         });
         let o = run("ec.distort.ccblobbylize", &[("property", Value::Enum(0)), ("softness", num(0.0)), ("cutAway", num(100.0))], im, &[]);
         assert!(o.img.data.iter().all(|p| p[3] == 0.0), "Cut Away 100 left opaque pixels");
+    }
+
+    #[test]
+    fn blobbylize_cut_away_100_clears_an_opaque_edge() {
+        // An opaque source reaches h = 1 on the high side of an edge; the gradient antialias
+        // used to leave m = 0.5 there, so Cut Away 100 still produced visible pixels.
+        let im = crate::util::gen_image(64, 8, |x, _| if x < 32 { [1.0; 4] } else { [0.0; 4] });
+        let o = run("ec.distort.ccblobbylize", &[("property", Value::Enum(3)), ("softness", num(0.0)), ("cutAway", num(100.0))], im, &[]);
+        assert!(o.img.data.iter().all(|p| p[3] == 0.0), "Cut Away 100 left an opaque edge");
     }
 
     #[test]
