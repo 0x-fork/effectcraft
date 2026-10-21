@@ -167,3 +167,61 @@ fn a_created_primitive_survives_save_and_reopen() {
     assert_eq!(comp.renderer, Renderer::Advanced3D);
     assert_ring(&comp.layers[0]);
 }
+
+#[test]
+fn untouched_dimensions_take_each_types_defaults_and_typed_ones_carry_over() {
+    let mut h = harness();
+    open(&mut h);
+    choose(&mut h, PrimitiveKind::Plane);
+    click(&mut h, "dialog.primitive.ok");
+    let plane = layers(&h).remove(0);
+    assert_eq!(geometry(&plane, "width"), 400.0, "a plane's default, not the cube's 300");
+    open(&mut h);
+    type_into(&mut h, "dialog.primitive.width", "120");
+    choose(&mut h, PrimitiveKind::Plane);
+    click(&mut h, "dialog.primitive.ok");
+    let plane = layers(&h).into_iter().find(|l| l.id != plane.id).unwrap();
+    assert_eq!(geometry(&plane, "width"), 120.0, "the typed width carries over");
+    assert_eq!(geometry(&plane, "height"), 400.0);
+}
+
+/// A dialog left open while something else changes the editing context closes without creating
+/// anything rather than adding the primitive where it was not opened.
+fn closes_when(change: impl FnOnce(&mut Session)) {
+    let mut h = harness();
+    let a = h.state().session.active_comp_id().unwrap();
+    open(&mut h);
+    choose(&mut h, PrimitiveKind::Torus);
+    change(&mut h.state_mut().session);
+    let b = h.state().session.active_comp_id().unwrap();
+    let steps = h.state().session.history.undo.len();
+    h.run_steps(2);
+    assert_eq!(h.state().dialog, None, "the dialog closes");
+    assert!(rect(&h, "dialog.primitive.ok").is_none());
+    let s = &h.state().session;
+    for c in [a, b] {
+        if let Some(c) = s.project.comp(c) {
+            assert!(c.layers.is_empty(), "nothing is created");
+            assert_eq!(c.renderer, Renderer::Classic3D);
+        }
+    }
+    assert_eq!(s.history.undo.len(), steps);
+    assert!(h.state().ui.status.contains("changed"), "{}", h.state().ui.status);
+}
+
+#[test]
+fn another_comp_made_active_closes_the_dialog() {
+    closes_when(|s| {
+        s.execute("comp.new", json!({"name": "Other", "width": 640, "height": 360, "duration": 2})).unwrap();
+    });
+}
+
+#[test]
+fn a_replaced_project_closes_the_dialog_even_when_the_comp_id_is_reused() {
+    closes_when(|s| {
+        let before = s.active_comp_id().unwrap();
+        s.execute("file.newProject", json!({})).unwrap();
+        s.execute("comp.new", json!({"name": "Scene", "width": 640, "height": 360, "duration": 2})).unwrap();
+        assert_eq!(s.active_comp_id(), Some(before), "the new project reuses the comp's id");
+    });
+}

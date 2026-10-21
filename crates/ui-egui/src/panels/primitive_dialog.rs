@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use crate::i18n::tr;
 use effectcraft_engine::project::build::{Ids, primitive_geometry_options};
-use effectcraft_engine::project::{ParamUi, PrimitiveKind, Property};
+use effectcraft_engine::project::{ItemId, ParamUi, PrimitiveKind, Property};
 use egui::{Color32, vec2};
 use serde_json::{Value, json};
 
@@ -19,9 +19,15 @@ pub struct PrimitiveDraft {
     pub name: String,
     /// Whether the name was typed; until then it follows the type.
     pub named: bool,
-    /// Dimensions by Geometry Options match id, kept when the type changes (a sphere's radius
-    /// carries over to a cone).
+    /// Dimensions typed, by Geometry Options match id, kept when the type changes (a sphere's
+    /// radius carries over to a cone); the rest are the type's defaults.
     pub dims: BTreeMap<String, f64>,
+    /// The project (its epoch) and comp the dialog was opened for.
+    pub target: Option<(u64, ItemId)>,
+}
+
+fn target(app: &EffectcraftApp) -> Option<(u64, ItemId)> {
+    Some((app.session.script_ui.project_epoch, app.session.active_comp_id()?))
 }
 
 /// The dimensions a primitive type has: its Geometry Options as the engine builds them.
@@ -32,15 +38,22 @@ fn dimensions(kind: PrimitiveKind) -> Vec<Property> {
 
 /// Open the dialog for a new primitive in the active comp.
 pub fn open(app: &mut EffectcraftApp) -> Result<(), String> {
-    app.session.active_comp().ok_or("no composition is open")?;
+    let target = Some(target(app).ok_or("no composition is open")?);
     let kind = PrimitiveKind::Cube;
-    app.dialog_state.primitive = PrimitiveDraft { kind, name: kind.label().to_string(), named: false, dims: BTreeMap::new() };
+    app.dialog_state.primitive = PrimitiveDraft { kind, name: kind.label().to_string(), named: false, dims: BTreeMap::new(), target };
     app.dialog = Some(Dialog::NewPrimitive);
     Ok(())
 }
 
 pub fn dialog(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
     let mut d = app.dialog_state.primitive.clone();
+    // A project opened or another comp made active since (by a script or the control channel):
+    // the primitive would land somewhere the dialog was not opened for.
+    if target(app) != d.target {
+        app.ui.status = "New 3D Primitive closed: the composition changed".into();
+        app.dialog = None;
+        return;
+    }
     let (mut ok, mut close) = (false, false);
     super::dialogs::modal(ctx, "New 3D Primitive", vec2(420.0, 300.0), t, |ui| {
         egui::Grid::new("primitive-grid").num_columns(2).spacing([14.0, 9.0]).show(ui, |ui| {
@@ -63,12 +76,15 @@ pub fn dialog(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
             ui.end_row();
             for p in dimensions(d.kind) {
                 let ParamUi::Slider { min, max, decimals, .. } = p.ui else { continue };
-                let v = d.dims.entry(p.match_id.clone()).or_insert(p.value.as_f64());
+                let mut v = d.dims.get(&p.match_id).copied().unwrap_or(p.value.as_f64());
                 ui.label(tr(&p.name));
                 // Counts (segments, rings) are whole numbers; sizes are pixels.
                 let suffix = if decimals == 0 { "" } else { " px" };
-                let r = ui.add(crate::widgets::drag_value(egui::DragValue::new(v).range(min..=max).max_decimals(decimals as usize).suffix(suffix)));
+                let r = ui.add(crate::widgets::drag_value(egui::DragValue::new(&mut v).range(min..=max).max_decimals(decimals as usize).suffix(suffix)));
                 app.auto.add_response(&format!("dialog.primitive.{}", p.match_id), &r, &p.name);
+                if r.changed() {
+                    d.dims.insert(p.match_id, v);
+                }
                 ui.end_row();
             }
         });
