@@ -38,7 +38,7 @@ self.addEventListener("fetch", (event) => {
       const hit = await cache.match(key, { ignoreSearch: req.mode === "navigate" });
       if (hit) return hit;
       const res = await fetch(req);
-      if (res.ok && res.type === "basic") cache.put(req, res.clone());
+      if (res.ok && res.type === "basic") void cache.put(req, res.clone()).catch(() => {});
       return res;
     })(),
   );
