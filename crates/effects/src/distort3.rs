@@ -1170,6 +1170,22 @@ mod tests {
     }
 
     #[test]
+    fn blobbylize_defaults_match_ae() {
+        let s = crate::find("ec.distort.ccblobbylize").unwrap();
+        let default = |id: &str| s.params.iter().find(|p| p.id == id).unwrap().default.clone();
+        assert_eq!(default("property"), Value::Enum(0), "Property defaults to Red");
+        assert_eq!(default("softness"), num(20.0));
+        assert_eq!(default("cutAway"), num(25.0));
+        assert_eq!(default("lightHeight"), num(65.0));
+        assert_eq!(default("lightPosition"), pt(0.5, 0.5));
+        assert_eq!(default("ambient"), num(75.0));
+        assert_eq!(default("diffuse"), num(25.0));
+        assert_eq!(default("specular"), num(100.0));
+        assert_eq!(default("roughness"), num(0.025));
+        assert_eq!(default("metal"), num(100.0));
+    }
+
+    #[test]
     fn blobbylize_cut_away_thresholds_a_height_ramp() {
         // AE oracle: Cut Away is a linear height threshold with a ~1 px antialiased edge.
         let im = crate::util::gen_image(1920, 8, |x, _| {
