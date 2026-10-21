@@ -4,7 +4,7 @@
 use effectcraft_engine::Session;
 use effectcraft_engine::project::{Layer, LayerId, LayerSource, LightKind};
 use effectcraft_ui_egui::{Dialog, EffectcraftApp};
-use egui_kittest::Harness;
+use egui_kittest::{Harness, kittest::Queryable as _};
 use serde_json::{Value, json};
 
 fn harness() -> Harness<'static, EffectcraftApp> {
@@ -169,4 +169,33 @@ fn the_other_light_types_are_created_and_kept() {
         ok(&mut h);
         assert_eq!(kind(&h, id), k, "{} kept on reopening", k.label());
     }
+}
+
+#[test]
+fn falloff_and_shadow_options_show_only_for_lights_that_have_them() {
+    let mut h = harness();
+    invoke(&mut h, "layer.newLight", json!({}));
+    for k in LightKind::ALL {
+        choose(&mut h, k);
+        let shown = !matches!(k, LightKind::Ambient | LightKind::Environment);
+        for label in ["Falloff", "Casts Shadows", "Shadow Darkness"] {
+            assert_eq!(h.query_by_label(label).is_some(), shown, "{label} for {}", k.label());
+        }
+    }
+}
+
+#[test]
+fn changing_an_environment_light_to_spot_undoes_to_its_source_and_rotation() {
+    let mut h = harness();
+    let (env, sky) = environment_light(&mut h);
+    reopen(&mut h, env);
+    choose(&mut h, LightKind::Spot);
+    ok(&mut h);
+    assert_eq!(kind(&h, env), LightKind::Spot);
+    assert!(layer(&h, env).props.prop("lightOptions/source").is_none());
+    h.state_mut().session.execute("edit.undo", json!({})).unwrap();
+    let l = layer(&h, env);
+    assert_eq!(kind(&h, env), LightKind::Environment);
+    assert_eq!(l.props.prop("lightOptions/source").unwrap().value.as_layer(), Some(sky));
+    assert_eq!(l.props.prop("lightOptions/rotation").unwrap().value.as_f64(), 30.0);
 }
