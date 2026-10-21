@@ -297,6 +297,43 @@ impl Buf {
     }
 }
 
+/// Motion Tile's output frame for a buffer with layer origin `offset` (pixels) at `scale`:
+/// `(width, height, offset)`. Output Width / Height grow (or crop) the layer rectangle about its
+/// centre, on adjustment layers too, where the rectangle is the comp's and starts at the comp
+/// origin in the buffer below (After Effects; a Transform after it brings the tiles into view,
+/// #1727). An adjustment at 100 % keeps the buffer it was given; one whose frame would pass
+/// 16 384 pixels a side does too.
+pub fn motion_tile_frame(ctx: &EffectCtx, offset: [f64; 2], size: (u32, u32), scale: f64) -> (u32, u32, [f64; 2]) {
+    let (lw, lh) = (ctx.layer_size[0], ctx.layer_size[1]);
+    let (pw, ph) = (ctx.params.f("outputWidth"), ctx.params.f("outputHeight"));
+    let ow = (lw * pw / 100.0).max(1.0 / scale);
+    let oh = (lh * ph / 100.0).max(1.0 / scale);
+    let (nw, nh) = ((ow * scale).round().max(1.0), (oh * scale).round().max(1.0));
+    let grow = [(ow - lw) * 0.5 * scale, (oh - lh) * 0.5 * scale];
+    if !ctx.adjustment {
+        return (nw as u32, nh as u32, grow);
+    }
+    // The grown rectangle's top-left in the buffer below, on whole pixels so the result lines
+    // up with the comp again when the stack ends.
+    let (x0, y0) = ((offset[0] - grow[0]).round(), (offset[1] - grow[1]).round());
+    let fits = [x0, y0, nw, nh].iter().all(|v| v.is_finite()) && nw <= 16384.0 && nh <= 16384.0;
+    if (pw == 100.0 && ph == 100.0) || !fits {
+        return (size.0, size.1, offset);
+    }
+    (nw as u32, nh as u32, [offset[0] - x0, offset[1] - y0])
+}
+
+/// Where an adjustment stack's result (comp origin at `offset`, `size` pixels) lies on the canvas
+/// it came from (comp origin at `canvas_offset`): the result pixel at canvas pixel (0, 0).
+/// `None` when it already is the canvas, frame for frame.
+pub fn adjustment_crop(offset: [f64; 2], canvas_offset: [f64; 2], size: (u32, u32), canvas: (u32, u32)) -> Option<(i64, i64)> {
+    let (dx, dy) = ((offset[0] - canvas_offset[0]).round(), (offset[1] - canvas_offset[1]).round());
+    if !dx.is_finite() || !dy.is_finite() || (dx == 0.0 && dy == 0.0 && size == canvas) {
+        return None;
+    }
+    Some((dx as i64, dy as i64))
+}
+
 /// Where [`Buf::cover`] would take a buffer: shift its pixels by `(dx, dy)` and resize it to
 /// `width` × `height` so it spans the `size`-layer-pixel region that starts at its offset — the
 /// whole layer rectangle, which a sized source's buffer already is. `None` when the buffer
