@@ -495,7 +495,7 @@ export async function cacheRead(name) {
 export async function cacheWrite(fullName, bytes) {
   const [dir, name] = await entryDir(fullName);
   const canMove = typeof FileSystemHandle !== "undefined" && "move" in FileSystemHandle.prototype;
-  const tmp = canMove ? `${name}.tmp.${Math.random().toString(36).slice(2)}` : name;
+  const tmp = canMove ? `${name}.tmp.${crypto.randomUUID()}` : name;
   const fh = await dir.getFileHandle(tmp, { create: true });
   if (fh.createSyncAccessHandle) {
     const h = await fh.createSyncAccessHandle();
