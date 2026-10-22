@@ -747,12 +747,17 @@ fn display_name(app: &EffectcraftApp, l: &Layer) -> String {
 /// layer whose names contain `q` (lowercase), each with its enclosing groups. A matching group
 /// brings its whole contents.
 fn search_rows(l: &Layer, q: &str) -> Vec<Row> {
+    /// The row for a group in search results: depth, its effect's enabled flag, and the eye
+    /// switch for layer-style groups (not Blending Options).
     fn group_row(l: &Layer, g: &PropGroup, depth: usize, parent: &PropGroup) -> Row {
         let fx = matches!(g.kind, GroupKind::Effect { .. }).then_some(g.enabled);
         let eye =
             (parent.match_id == effectcraft_engine::project::styles::GROUP && g.match_id != effectcraft_engine::project::styles::BLENDING).then_some(g.enabled);
         Row { layer: l.id, depth, kind: RowKind::Group { uid: g.uid, name: g.name.clone(), open: true, has_children: !g.children.is_empty(), fx, eye } }
     }
+    /// Every visible child of `g` at `depth`, groups recursed into whole — a matching group
+    /// brings its contents. A shape group's inner Contents is elided (as in AE): no row, and
+    /// its items list at the same depth as the group itself.
     fn all(l: &Layer, g: &PropGroup, depth: usize, out: &mut Vec<Row>) {
         for c in &g.children {
             match c {
@@ -767,6 +772,9 @@ fn search_rows(l: &Layer, q: &str) -> Vec<Row> {
             }
         }
     }
+    /// The children of `g` that match `q`: a name-matching group brings its whole contents
+    /// (`all`); otherwise the search recurses and keeps only subtrees with hits. A shape
+    /// group's inner Contents is searched through without a row of its own (as in AE).
     fn rec(l: &Layer, g: &PropGroup, depth: usize, q: &str, out: &mut Vec<Row>) {
         for c in &g.children {
             match c {
@@ -1175,6 +1183,10 @@ fn collect_props(g: &PropGroup, out: &mut Vec<u64>, f: &dyn Fn(&Property) -> boo
     }
 }
 
+/// The rows for the children of `g` at `depth`: groups recurse into when their twirl-down is
+/// in `open`, text animators list their selectors and properties directly (as in AE), and a
+/// shape group's inner Contents (AE's elided `ADBE Vectors Group`) is skipped so its items
+/// list directly under the group.
 fn push_group(rows: &mut Vec<Row>, l: &Layer, g: &PropGroup, depth: usize, open: &std::collections::BTreeSet<u64>) {
     for c in &g.children {
         match c {
@@ -4428,8 +4440,9 @@ mod tests {
         assert!(labels(&app).iter().any(|r| r.trim() == "Scale"));
     }
 
-    /// A shape group's inner Contents (AE's elided `ADBE Vectors Group`) draws no row: a search
-    /// finds the group's items directly, and the only "Contents" row is the layer's.
+    /// A shape group's inner Contents (AE's elided `ADBE Vectors Group`) draws no row: the
+    /// search shows the full row hierarchy with the group's items — path, fill and Transform —
+    /// listing directly under the group, and the only "Contents" row the layer's own.
     #[test]
     fn shape_group_inner_contents_is_elided() {
         let mut s = effectcraft_engine::Session::default();
@@ -4437,10 +4450,34 @@ mod tests {
         s.execute("layer.newShape", json!({"kind": "rect"})).unwrap();
         let mut app = EffectcraftApp::new(s);
         app.ui.timeline.search = "rect".into();
-        let rows = labels(&app);
-        assert!(rows.iter().any(|r| r.trim() == ">Rectangle 1"), "the shape group matches: {rows:?}");
-        assert!(rows.iter().any(|r| r.trim() == ">Rectangle Path 1"), "its path lists directly under it: {rows:?}");
-        assert_eq!(rows.iter().filter(|r| r.trim() == ">Contents").count(), 1, "only the layer's Contents: {rows:?}");
+        assert_eq!(
+            labels(&app),
+            [
+                "Shape Layer 1",
+                "  >Contents",
+                "    >Rectangle 1",
+                "      >Rectangle Path 1",
+                "        Size",
+                "        Position",
+                "        Roundness",
+                "      >Fill 1",
+                "        Composite",
+                "        Fill Rule",
+                "        Color",
+                "        Opacity",
+                "      >Transform",
+                "        Anchor Point",
+                "        Position",
+                "        Scale",
+                "        Skew",
+                "        Skew Axis",
+                "        Rotation",
+                "        Opacity",
+            ]
+            .iter()
+            .map(|r| r.to_string())
+            .collect::<Vec<_>>()
+        );
     }
 
     #[test]
