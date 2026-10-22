@@ -8,6 +8,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
 
+/// Open the demo project in a UI test harness with the requested window size.
 fn harness(w: f32, h: f32) -> Harness<'static, EffectcraftApp> {
     let mut s = Session::default();
     s.execute("file.openDemoProject", json!({})).unwrap();
@@ -16,6 +17,7 @@ fn harness(w: f32, h: f32) -> Harness<'static, EffectcraftApp> {
     h
 }
 
+/// Return a registered widget's rectangle so UI tests can inspect its layout.
 fn rect(h: &Harness<'_, EffectcraftApp>, id: &str) -> Rect {
     let e = h.state().auto.find(id).unwrap_or_else(|| panic!("no {id}"));
     Rect::from_min_size(pos2(e.rect[0], e.rect[1]), vec2(e.rect[2], e.rect[3]))
@@ -162,4 +164,23 @@ fn settings_dialog_does_not_scroll_sideways() {
     });
     h.run_steps(20);
     assert_eq!((rect(&h, "settings.ok"), rect(&h, "settings.page.general")), (ok, page), "nothing moved sideways");
+}
+
+/// #2034: the Settings sidebar uses the translated page names when deciding its width.
+#[test]
+fn settings_page_column_fits_japanese_names() {
+    use effectcraft_ui_egui::theme::Tokens;
+
+    let mut session = Session::default();
+    session.prefs.general.language = "ja".into();
+    let mut h = Harness::builder().with_size(vec2(1400.0, 900.0)).build_eframe(|_| EffectcraftApp::new(session));
+    h.run_steps(3);
+    let ctx = h.ctx.clone();
+    effectcraft_ui_egui::menus::invoke(h.state_mut(), &ctx, "app.settings", json!({"page": "scripting"})).unwrap();
+    h.run_steps(3);
+
+    let name = "スクリプトとエクスプレッション";
+    let text_width = h.ctx.fonts_mut(|fonts| fonts.layout_no_wrap(name.into(), Tokens::ui(12.5), egui::Color32::WHITE).size().x);
+    let row = rect(&h, "settings.page.scripting");
+    assert!(row.width() >= text_width + 20.0, "{name} needs {text_width} points; row is {row:?}");
 }
