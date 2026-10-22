@@ -2,6 +2,8 @@
 
 use egui::{Align2, Color32, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
+use effectcraft_project::ParamUi;
+
 use crate::automation::Registry;
 use crate::icons::{self, Icon};
 use crate::theme::Tokens;
@@ -143,6 +145,16 @@ pub fn hot_number_at(
 /// still scrubs finely and Shift by tens.
 pub fn proportional_scrub(m: egui::Modifiers) -> bool {
     m.command && m.alt
+}
+
+/// How far one pointer pixel scrubs a hot-text field: the property's slider (soft) range over
+/// 300 px. The Timeline and Effect Controls share this so they cannot drift; a large hard range
+/// only allows typing big values, it must not make dragging coarse (#2097).
+pub fn slider_scrub_speed(ui: &ParamUi) -> f64 {
+    match ui {
+        ParamUi::Slider { slider_min, slider_max, .. } => ((slider_max - slider_min) / 300.0).clamp(0.001, 50.0),
+        _ => 0.5,
+    }
 }
 
 /// [`hot_number_at`] for a whole number (an angle's revolutions): a drag steps it once every
@@ -665,6 +677,15 @@ pub(crate) fn constrained(c: &[f64], d: usize, v: f64) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2097: the drag speed comes from the slider range, not a much wider hard range.
+    #[test]
+    fn slider_scrub_speed_uses_the_slider_range() {
+        let slider = |min, max, slider_min, slider_max| ParamUi::Slider { min, max, slider_min, slider_max, decimals: 1 };
+        assert!((slider_scrub_speed(&slider(0.0, 10_000.0, 0.0, 1_000.0)) - 1_000.0 / 300.0).abs() < 1e-9);
+        assert!((slider_scrub_speed(&slider(0.0, 1.0e9, 0.0, 1.0)) - 1.0 / 300.0).abs() < 1e-9);
+        assert_eq!(slider_scrub_speed(&ParamUi::Number), 0.5);
+    }
 
     /// #488: an inline editor selects its whole text only as it opens. Should it be without the
     /// keyboard for a frame later (an input method, another handler), it takes the keyboard back
