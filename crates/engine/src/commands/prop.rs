@@ -22,8 +22,11 @@ pub(crate) fn prop_ref(s: &Session, p: &Value, cmd: &str) -> Result<(ItemId, Lay
         });
     }
     let path = str_p(p, "path").ok_or_else(|| bad(cmd, "missing `path` (e.g. transform/position) or `prop` uid"))?;
-    let pr = layer.props.prop(path).ok_or_else(|| {
-        let group = layer.props.group(path).or_else(|| path.trim().strip_prefix('@')?.parse().ok().and_then(|uid| layer.props.find_group(uid)));
+    // `effects/<match name>[#n]/<property>` is how `essential.list`, presets and Copy write an
+    // effect property; turn it into the uid path `PropGroup::prop` parses (#2064).
+    let resolved = super::resolve_effect_path(layer, path);
+    let pr = layer.props.prop(&resolved).ok_or_else(|| {
+        let group = layer.props.group(&resolved).or_else(|| path.trim().strip_prefix('@')?.parse().ok().and_then(|uid| layer.props.find_group(uid)));
         if group.is_some() {
             bad(cmd, format!("`{path}` is a property group; use layer.tree (MCP: get_layer) to inspect its children, then select a leaf property"))
         } else {
