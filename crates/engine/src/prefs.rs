@@ -110,7 +110,8 @@ page!(General {
     /// Synchronize Time of All Related Items.
     sync_time_related_items: bool = true,
     expression_pick_whip_compact: bool = true,
-    create_split_layers_above: bool = false,
+    /// Create Split Layers Above Original Layer (After Effects' default).
+    create_split_layers_above: bool = true,
     use_system_color_picker: bool = false,
     /// Number of projects in File ▸ Open Recent.
     recent_items: u32 = 10,

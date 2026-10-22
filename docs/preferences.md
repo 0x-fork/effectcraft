@@ -91,7 +91,8 @@ Commands (CLI, MCP, control channel):
   one and in the comps that nest it (through the precomp layers' timing)
 - `general.expressionPickWhipCompact`: off, the pick whip writes match names
   (`thisComp.layer("A")("transform")("opacity")`)
-- `general.createSplitLayersAbove`: where Edit ▸ Split Layer puts the new layer
+- `general.createSplitLayersAbove`: where Edit ▸ Split Layer puts the new layer (on by default,
+  as in After Effects)
 - `startup.showHomeOnOpenProject`: the Home screen comes up after File ▸ Open / Open Recent
 - `composition.motionPath`, `composition.motionPathSeconds`, `composition.motionPathKeyframes`:
   how much of a position motion path the viewer draws (all, none, N seconds or N keyframes
