@@ -3542,7 +3542,11 @@ fn layer_cells(
             continue;
         }
         let cr = Rect::from_min_max(pos2(x + 2.0, r.min.y + 1.0), pos2(x + TIME_W - 2.0, r.max.y - 1.0));
-        let tc = crate::panels::timecode(&app.session, comp, Tick::from_seconds_f64(secs) - if kind == "duration" { comp.display_start } else { Tick(0) });
+        let tc = if kind == "duration" {
+            crate::panels::duration(&app.session, comp, Tick::from_seconds_f64(secs))
+        } else {
+            crate::panels::timecode(&app.session, comp, Tick::from_seconds_f64(secs))
+        };
         let resp = ui.interact(cr, egui::Id::new(("tl-cell", kind, lid)), Sense::drag()).on_hover_text(crate::i18n::tr("Drag to change"));
         lp.text(pos2(cr.min.x + 4.0, cy), Align2::LEFT_CENTER, &tc, Tokens::mono(11.0), if resp.hovered() || resp.dragged() { t.hot_text } else { t.timecode });
         app.auto.add(&format!("timeline.layer.{lid}.{kind}"), cr, &tc);

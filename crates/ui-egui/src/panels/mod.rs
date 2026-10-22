@@ -151,6 +151,11 @@ pub fn timecode(session: &Session, comp: &Comp, t: Tick) -> String {
     effectcraft_engine::commands::time::display_time(session, comp, t)
 }
 
+/// A length (a Duration) formatted per project settings, with no start offset.
+pub fn duration(session: &Session, comp: &Comp, len: Tick) -> String {
+    effectcraft_engine::commands::time::display_duration(session, comp, len)
+}
+
 /// Ctrl/Cmd-click on a current-time display toggles the project's Time Display Style between
 /// Timecode and Frames, as in After Effects (through Project Settings: one undo step).
 pub(crate) fn toggle_time_display(app: &mut EffectcraftApp, resp: &egui::Response) {
