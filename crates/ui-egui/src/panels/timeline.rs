@@ -4233,13 +4233,16 @@ fn value_editor(
         }
         Value::Text(_) => {}
         Value::Layer(l) => {
-            p.text(
-                pos2(x, at.y),
-                Align2::LEFT_CENTER,
-                l.map(|l| crate::i18n::tr_args("Layer {}", &[&l])).unwrap_or(crate::i18n::tr("None").into()),
-                Tokens::ui(12.0),
-                t.hot_text,
-            );
+            // Layer references (a light's Source, a Displacement Map's layer…) pick from the
+            // comp's layers, as in Effect Controls; the choice is written through the same
+            // undoable prop.set as the other value arms.
+            let r = Rect::from_min_size(pos2(x, at.y - 9.0), vec2(150.0, 18.0));
+            if let Some(comp) = app.session.active_comp_arc()
+                && let Some(chosen) = widgets::layer_picker(ui, r, &comp.layers, *l, &t, egui::Id::new(("tl-lay", uid)))
+            {
+                set(actions, chosen.map(|id| json!(id)).unwrap_or(serde_json::Value::Null));
+            }
+            app.auto.add(&format!("timeline.prop.{uid}.value"), r, &prop.name);
         }
         Value::Gradient(_) => {
             // Opens the Gradient Editor at the current time (#612).
