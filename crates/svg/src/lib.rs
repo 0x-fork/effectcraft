@@ -483,13 +483,14 @@ fn parse_css(css: &str, sheet: &mut StyleSheet) -> Result<(), Error> {
         if sel.starts_with('@') {
             continue;
         }
-        let decls = parse_decls(body);
+        let mut decls = parse_decls(body);
         sheet.decls = sheet.decls.saturating_add(decls.len());
         if sheet.decls > MAX_CSS_DECLARATIONS {
             return Err(Error::Xml(format!("its <style> sheets hold more than {MAX_CSS_DECLARATIONS} declarations")));
         }
-        let block = sheet.blocks.len();
-        sheet.blocks.push(decls);
+        // Stored with the rule's first accepted selector: a rule of unsupported selectors only
+        // (`a b{}`, repeated) adds no block.
+        let mut block = None;
         for one in sel.split(',') {
             let one = one.trim();
             // Only simple selectors (no combinators / pseudo-classes / attributes).
@@ -499,6 +500,11 @@ fn parse_css(css: &str, sheet: &mut StyleSheet) -> Result<(), Error> {
             if sheet.rules.len() >= MAX_CSS_SELECTORS {
                 return Err(Error::Xml(format!("its <style> sheets hold more than {MAX_CSS_SELECTORS} selectors")));
             }
+            let block = *block.get_or_insert_with(|| {
+                let i = sheet.blocks.len();
+                sheet.blocks.push(std::mem::take(&mut decls));
+                i
+            });
             let mut tag = None;
             let mut classes = vec![];
             let mut id = None;
@@ -611,8 +617,13 @@ impl<'a, 'i> Parser<'a, 'i> {
         if css.rules.is_empty() {
             return;
         }
+        // Splitting and sorting the class list is work too: charge its length first.
+        let class = n.attribute("class").unwrap_or_default();
+        if !self.charge_css(class.len()) {
+            return;
+        }
         let tag = n.tag_name().name();
-        let mut classes: Vec<&str> = n.attribute("class").map(|c| c.split_whitespace().collect()).unwrap_or_default();
+        let mut classes: Vec<&str> = class.split_whitespace().collect();
         classes.sort_unstable();
         classes.dedup();
         let id = n.attribute("id");
