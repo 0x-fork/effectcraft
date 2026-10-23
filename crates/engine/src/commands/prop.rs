@@ -182,7 +182,9 @@ pub(crate) fn key_time(layer: &Layer, frame_rate: FrameRate, p: &Value, param: &
 pub(crate) fn key_timing(layer: &Layer, t: Tick) -> Value {
     let ct = layer.comp_time(t);
     let mut out = json!({"time": t.seconds(), "layerTime": t.seconds(), "compTime": ct.seconds()});
-    if !layer.is_active_at(ct) {
+    // A key exactly on the out point ends a fade normally: it is outside the half-open visible
+    // range, but it is not a caller mistake, so it does not warn (#2084).
+    if ct < layer.in_point || ct > layer.out_point {
         out["warning"] = json!(format!(
             "Keyframe at comp time {} s is outside the layer's active range [{} s, {} s).",
             ct.seconds(),
