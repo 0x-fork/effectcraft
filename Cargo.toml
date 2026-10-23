@@ -139,9 +139,12 @@ type_complexity = "allow"
 
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 
 [profile.dev]
 opt-level = 1
+# Panics and backtraces keep file and line; full debug info only made the many test binaries large.
+debug = "line-tables-only"
 
 # Pixel hot loops: keep debug builds interactive.
 [profile.dev.package.effectcraft-raster]

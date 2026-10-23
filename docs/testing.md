@@ -5,6 +5,13 @@ cargo test --workspace     # everything
 cargo xtask ci             # fmt, clippy -D warnings, tests, layers, assets, wasm
 ```
 
+`cargo xtask ci` builds in the dev profile and runs the tests with `cargo nextest run` (plus
+`cargo test --doc`) when `cargo-nextest` is installed, and with `cargo test` otherwise.
+
+Each crate with several integration-test files has one test binary, `tests/it/main.rs`, whose
+modules are the files in `tests/it/`. Run one file with `cargo test -p <crate> --test it <module>::`
+or `cargo nextest run -p <crate> -E 'binary(it) and test(/^<module>::/)'`.
+
 ## What the tests cover
 
 - **Engine commands** (`crates/engine/src/tests*.rs`): every command family, including undo and
@@ -16,7 +23,7 @@ cargo xtask ci             # fmt, clippy -D warnings, tests, layers, assets, was
 - **Effects** (`crates/effects`): each effect has a determinism test and at least one behaviour
   test (identity at neutral settings, known pixel results, or simulations giving the same frame
   whether you seek straight to it or play up to it). A registry-wide test checks that effects
-  which read the clock are declared time-dependent. `crates/effects/tests/sim_golden.rs` pins
+  which read the clock are declared time-dependent. `crates/effects/tests/it/sim_golden.rs` pins
   exact pixel hashes of the simulation effects the GPU shares plans with (CC Rainfall … Card
   Wipe) at several settings, times, bit depths and resolutions, so any change to their CPU output
   fails (re-pin with `SIM_GOLDEN_PRINT=1` after an intended change; pinned for aarch64 macOS,

@@ -597,7 +597,15 @@ fn run_at(runs: &[(Range<usize>, TextStyle)], b: usize) -> usize {
 }
 
 /// Lay out one paragraph (no newlines) whose text starts at byte `base` of the whole string.
-fn paragraph(text: &str, base: usize, runs: &[(Range<usize>, TextStyle)], primaries: &[Resolved], variation_ids: &[u32], para: &ParagraphStyle, width: Option<f32>) -> Vec<ParaLine> {
+fn paragraph(
+    text: &str,
+    base: usize,
+    runs: &[(Range<usize>, TextStyle)],
+    primaries: &[Resolved],
+    variation_ids: &[u32],
+    para: &ParagraphStyle,
+    width: Option<f32>,
+) -> Vec<ParaLine> {
     let rtl_para = para.rtl == Some(true);
     let margins_for = |first: bool| -> (f32, f32) {
         let fi = if first { para.indent_first } else { 0.0 };
