@@ -2052,6 +2052,12 @@ impl<'a> Renderer<'a> {
             color::convert(&mut below.img, &c);
         }
         let mut adjusted = self.apply_effects(ctx, layer, below, true);
+        // An effect that changed the frame (Motion Tile's Output size): back onto the canvas.
+        if let Some((dx, dy)) =
+            effectcraft_effects::adjustment_crop(adjusted.offset, o, (adjusted.img.width, adjusted.img.height), (canvas.width, canvas.height))
+        {
+            adjusted.img = adjusted.img.crop(dx, dy, canvas.width, canvas.height);
+        }
         if let Some(c) = self.pipe.to_blend() {
             color::convert(&mut adjusted.img, &c);
         }
@@ -2430,6 +2436,8 @@ mod tests_guides;
 mod tests_mask_blur;
 #[cfg(test)]
 mod tests_mask_expansion;
+#[cfg(test)]
+mod tests_motion_tile;
 #[cfg(test)]
 mod tests_nested;
 #[cfg(test)]

@@ -357,7 +357,11 @@ fn draw_adjustment(e: &mut Enc, r: &Renderer, ctx: &EvalCtx, layer: &Layer, canv
     };
     let mut fx = crate::effects::GpuFx::new(e, below, [0.0; 2], r.opts.scale, pipe.levels);
     r.run_effects_on(ctx, layer, true, &mut fx);
-    let (mut adjusted, _, _) = fx.finish()?;
+    let (mut adjusted, offset, _) = fx.finish()?;
+    // An effect that changed the frame (Motion Tile's Output size): back onto the canvas.
+    if let Some((dx, dy)) = effectcraft_effects::adjustment_crop(offset, [0.0; 2], (adjusted.width, adjusted.height), (w, h)) {
+        adjusted = e.crop(&adjusted, dx, dy, w, h);
+    }
     if adjusted.width != w || adjusted.height != h {
         return Some(());
     }
