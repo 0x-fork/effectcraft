@@ -84,6 +84,13 @@ pub(super) fn missing(language: &str) -> Vec<&'static str> {
     ROWS.iter().flat_map(|(_, rows)| rows.iter().map(|(en, _)| *en)).filter(|en| seen.insert(*en) && !table.is_some_and(|c| c.contains_key(en))).collect()
 }
 
+/// Characters required by the fixed panel catalog, for system-font coverage selection.
+/// Sorted and deduplicated so fallback registration is deterministic.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn catalog_characters(language: &str) -> Vec<char> {
+    catalog(language).into_iter().flat_map(|c| c.values()).flat_map(|s| s.chars()).collect::<std::collections::BTreeSet<_>>().into_iter().collect()
+}
+
 /// Translate one interface string: the current language's row for `text`, or `text` itself.
 pub(crate) fn tr(text: &str) -> &str {
     catalog(current()).and_then(|c| c.get(text)).copied().unwrap_or(text)
