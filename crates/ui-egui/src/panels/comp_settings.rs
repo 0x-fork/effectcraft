@@ -512,11 +512,10 @@ pub fn params(d: &CompDraft) -> serde_json::Value {
     })
 }
 
-/// The frame size the comp renders at `res`: every n-th pixel, a partial one counted (Auto
-/// follows the magnification, so the dialog shows the full frame for it).
+/// The frame size the comp renders at `res` (Auto follows the magnification, so the dialog shows
+/// the full frame for it).
 pub fn frame_at(w: u32, h: u32, res: Resolution) -> (u32, u32) {
-    let n = u32::from(res.factor().unwrap_or(1).max(1));
-    (w.div_ceil(n), h.div_ceil(n))
+    effectcraft_render::frame_size(w, h, 1.0 / f64::from(res.factor().unwrap_or(1).max(1)))
 }
 
 #[cfg(test)]
@@ -525,9 +524,10 @@ mod tests {
 
     #[test]
     fn frame_size_follows_the_resolution() {
-        assert_eq!(frame_at(1920, 1081, Resolution::Half), (960, 541), "an odd side keeps its last pixel");
-        assert_eq!(frame_at(1920, 1080, Resolution::Third), (640, 360));
-        assert_eq!(frame_at(1920, 1080, Resolution::Custom(7)), (275, 155));
+        // The renderer's size, which rounds: 1081 / 3 = 360.33 and 1920 / 7 = 274.3.
+        assert_eq!(frame_at(1920, 1081, Resolution::Third), (640, 360));
+        assert_eq!(frame_at(1920, 1080, Resolution::Custom(7)), (274, 154));
+        assert_eq!(frame_at(1920, 1081, Resolution::Half), (960, 541));
         assert_eq!(frame_at(1920, 1080, Resolution::Full), (1920, 1080));
         assert_eq!(frame_at(1920, 1080, Resolution::Auto), (1920, 1080));
     }

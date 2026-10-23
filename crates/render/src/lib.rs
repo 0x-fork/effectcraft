@@ -1000,8 +1000,7 @@ impl<'a> Renderer<'a> {
     pub fn comp_frame_cpu(&self, comp_id: ItemId, t: Tick) -> Image {
         let Some(comp) = self.project.comp(comp_id) else { return Image::new(1, 1) };
         let s = self.opts.scale;
-        let w = ((comp.width as f64 * s).round() as u32).max(1);
-        let h = ((comp.height as f64 * s).round() as u32).max(1);
+        let (w, h) = frame_size(comp.width, comp.height, s);
         // Region of interest on a comp with 3D layers: render the frame and crop it. A region
         // reaching past the comp frame (the Extended Viewer) renders Classic 3D natively — the
         // planes project through the offset camera — and Advanced 3D as the frame, padded.
@@ -2361,6 +2360,12 @@ pub fn extended_region(w: u32, h: u32, visible: [f64; 4], margin: f64) -> Option
         return None;
     }
     Some([x0, y0, x1 - x0, y1 - y0])
+}
+
+/// The size of a `width` x `height` comp frame rendered at `scale` (both compositors, and the
+/// frame size Composition Settings shows for a Resolution).
+pub fn frame_size(width: u32, height: u32, scale: f64) -> (u32, u32) {
+    (((width as f64 * scale).round() as u32).max(1), ((height as f64 * scale).round() as u32).max(1))
 }
 
 pub fn render_frame(project: &Project, comp: ItemId, t: Tick, scale: f64) -> Image {
