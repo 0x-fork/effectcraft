@@ -559,7 +559,7 @@ impl Inner {
         let loaded = self.read(path).map_err(|e| e.to_string()).and_then(|bytes| {
             // Files the model names are read only when local or on the model's own network share.
             let resolve = |uri: &str| -> Option<Vec<u8>> {
-                let p = craft_docpath::resolve(uri, Some(std::path::Path::new(path))).ok().filter(|p| p.is_absolute())?;
+                let p = craft_docpath::resolve_absolute(uri, Some(std::path::Path::new(path))).ok()?;
                 self.read(&p.to_string_lossy()).ok().map(|b| b.to_vec())
             };
             effectcraft_model::load(path, &bytes, &resolve).map_err(|e| e.to_string())

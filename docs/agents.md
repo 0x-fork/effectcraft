@@ -216,7 +216,7 @@ Things that tripped up a long agent-driven session (a multi-scene 3D piece built
 
 ### Cookbook (from end-to-end QA)
 
-The scenarios in `crates/automation/tests/qa/` and `apps/effectcraft-cli/tests/qa_template.rs`
+The scenarios in `crates/automation/tests/qa/` and `apps/effectcraft-cli/tests/it/qa_template.rs`
 build real projects through these interfaces; they are worked examples of everything below.
 
 * **Name things when you create them**: `layer.newText`, `layer.newShape`, `layer.newSolid`,
