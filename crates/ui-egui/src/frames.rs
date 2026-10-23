@@ -24,7 +24,7 @@
 //! them (Info panel, eyedroppers, histograms).
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use effectcraft_engine::project::{Comp, ItemId, ItemKind, LayerSource, Node, Project, PropGroup};
@@ -258,8 +258,10 @@ pub struct RenderSource {
 /// ([`Frames::identity`]).
 type Identity = (u64, Option<Arc<Project>>);
 
-/// Content keys of (project revision, comp), computed once per revision.
-type ContentKeys = Arc<Mutex<HashMap<(u64, u64), u128>>>;
+/// Content keys of (project revision, comp, virtual-file generation). The generation is one
+/// counter bumped when a browser file is replaced, so a lookup stays a map read. Hashing the
+/// new bytes happens only when that generation misses.
+type ContentKeys = Arc<Mutex<HashMap<(u64, u64, u64), u128>>>;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
@@ -268,16 +270,16 @@ struct ContentKeyJobs {
     pending: VecDeque<(Arc<Project>, u64, u64)>,
 }
 
-fn content_key(keys: &ContentKeys, project: &Project, revision: u64, comp: u64) -> u128 {
-    if let Some(k) = keys.lock().ok().and_then(|m| m.get(&(revision, comp)).copied()) {
+fn content_key(keys: &ContentKeys, project: &Project, revision: u64, comp: u64, epoch: u64, virtual_id: Option<disk_cache::VirtualFileId<'_>>) -> u128 {
+    if let Some(k) = keys.lock().ok().and_then(|m| m.get(&(revision, comp, epoch)).copied()) {
         return k;
     }
-    let k = disk_cache::comp_content_key(project, ItemId(comp));
+    let k = disk_cache::comp_content_key_with(project, ItemId(comp), virtual_id);
     if let Ok(mut m) = keys.lock() {
         if m.len() > 256 {
             m.clear();
         }
-        m.insert((revision, comp), k);
+        m.insert((revision, comp, epoch), k);
     }
     k
 }
@@ -363,8 +365,15 @@ pub fn opts_hash(o: &RenderOpts) -> u64 {
 }
 
 /// Disk key of a viewer frame (render options included: region of interest, draft…).
-fn frame_disk_key(keys: &ContentKeys, project: &Project, key: &FrameKey, opts_hash: u64) -> u128 {
-    let content = content_key(keys, project, key.revision, key.comp);
+fn frame_disk_key(
+    keys: &ContentKeys,
+    project: &Project,
+    key: &FrameKey,
+    opts_hash: u64,
+    epoch: u64,
+    virtual_id: Option<disk_cache::VirtualFileId<'_>>,
+) -> u128 {
+    let content = content_key(keys, project, key.revision, key.comp, epoch, virtual_id);
     disk_cache::frame_key(content, key.frame, key.scale, key.view ^ opts_hash)
 }
 
@@ -441,6 +450,10 @@ pub struct Frames {
     /// Render time of the last viewer (urgent) frame in ms, for the Info panel / perf readout.
     pub last_ms: Arc<Mutex<f64>>,
     content_keys: ContentKeys,
+    /// Bumped when a virtual file is replaced. Lookups key on it instead of statting footage.
+    virtual_epoch: Arc<AtomicU64>,
+    /// Size and content hash for paths with no native metadata. Called only on a cache miss.
+    virtual_id: Option<Arc<dyn Fn(&str) -> Option<(u64, u64)> + Send + Sync>>,
     #[cfg(not(target_arch = "wasm32"))]
     content_key_jobs: Arc<Mutex<ContentKeyJobs>>,
     gpu_retired: Arc<AtomicBool>,
@@ -477,6 +490,8 @@ impl Default for Frames {
             ctx: None,
             last_ms: Arc::new(Mutex::new(0.0)),
             content_keys: Arc::default(),
+            virtual_epoch: Arc::new(AtomicU64::new(0)),
+            virtual_id: None,
             #[cfg(not(target_arch = "wasm32"))]
             content_key_jobs: Arc::default(),
             gpu_retired: Arc::default(),
@@ -768,9 +783,10 @@ impl Frames {
         if src.disk.is_none() && remote.is_none() {
             return vec![];
         }
+        let epoch = self.virtual_epoch.load(Ordering::Relaxed);
         #[cfg(not(target_arch = "wasm32"))]
         let content = {
-            let known = self.content_keys.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&(base.revision, base.comp)).copied();
+            let known = self.content_keys.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&(base.revision, base.comp, epoch)).copied();
             let Some(content) = known else {
                 self.request_content_key(src.project.clone(), base.revision, base.comp);
                 return vec![];
@@ -778,7 +794,7 @@ impl Frames {
             content
         };
         #[cfg(target_arch = "wasm32")]
-        let content = content_key(&self.content_keys, &src.project, base.revision, base.comp);
+        let content = content_key(&self.content_keys, &src.project, base.revision, base.comp, epoch, self.virtual_id.as_deref());
         let ram: HashSet<i64> = self.cached_frames(base).into_iter().collect();
         let oh = opts_hash(opts);
         (0..frames.clamp(0, 100_000))
@@ -803,6 +819,7 @@ impl Frames {
         jobs.running = true;
         drop(jobs);
         let (jobs, keys, ctx) = (self.content_key_jobs.clone(), self.content_keys.clone(), self.ctx.clone());
+        let (epoch, id) = (self.virtual_epoch.clone(), self.virtual_id.clone());
         let work = move || loop {
             let next = {
                 let mut jobs = jobs.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -813,7 +830,9 @@ impl Frames {
                 next
             };
             let Some((project, revision, comp)) = next else { return };
-            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| content_key(&keys, &project, revision, comp))).is_err() {
+            let epoch = epoch.load(Ordering::Relaxed);
+            let id = id.clone();
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| content_key(&keys, &project, revision, comp, epoch, id.as_deref()))).is_err() {
                 log::error!("could not compute a preview disk-cache key; the cache indicator will retry");
             }
             if let Some(ctx) = &ctx {
@@ -964,7 +983,19 @@ impl Frames {
             ctx: self.ctx.clone(),
             last: self.last_ms.clone(),
             content_keys: self.content_keys.clone(),
+            virtual_epoch: self.virtual_epoch.clone(),
+            virtual_id: self.virtual_id.clone(),
             gpu_retired: self.gpu_retired.clone(),
+        }
+    }
+
+    /// Browser file table: `epoch` bumps on each replacement, and `id` is the size and content
+    /// hash used when a content key is rebuilt. Neither runs on a cache hit.
+    pub fn set_virtual_media(&mut self, epoch: Arc<AtomicU64>, id: Arc<dyn Fn(&str) -> Option<(u64, u64)> + Send + Sync>) {
+        self.virtual_epoch = epoch;
+        self.virtual_id = Some(id);
+        if let Ok(mut keys) = self.content_keys.lock() {
+            keys.clear();
         }
     }
 
@@ -1036,7 +1067,8 @@ impl Frames {
             let fw = self.worker();
             let busy = self.remote_busy.clone();
             let t0 = web_time::Instant::now();
-            let disk_key = remote.disk().then(|| frame_disk_key(&w.content_keys, &job.src.project, &key, opts_hash(&job.opts)));
+            let epoch = w.virtual_epoch.load(Ordering::Relaxed);
+            let disk_key = remote.disk().then(|| frame_disk_key(&w.content_keys, &job.src.project, &key, opts_hash(&job.opts), epoch, w.virtual_id.as_deref()));
             let rj = RemoteJob { project: job.src.project.clone(), revision: key.revision, comp: job.comp, t: job.t, opts: job.opts, disk_key };
             remote.start(
                 rj,
@@ -1093,6 +1125,8 @@ struct Worker {
     ctx: Option<egui::Context>,
     last: Arc<Mutex<f64>>,
     content_keys: ContentKeys,
+    virtual_epoch: Arc<AtomicU64>,
+    virtual_id: Option<Arc<dyn Fn(&str) -> Option<(u64, u64)> + Send + Sync>>,
     gpu_retired: Arc<AtomicBool>,
 }
 
@@ -1147,7 +1181,12 @@ impl Worker {
             job
         };
         let t0 = web_time::Instant::now();
-        let disk = job.src.disk.as_ref().map(|dc| (dc.clone(), frame_disk_key(content_keys, &job.src.project, &job.key, opts_hash(&job.opts))));
+        let epoch = self.virtual_epoch.load(Ordering::Relaxed);
+        let disk = job
+            .src
+            .disk
+            .as_ref()
+            .map(|dc| (dc.clone(), frame_disk_key(content_keys, &job.src.project, &job.key, opts_hash(&job.opts), epoch, self.virtual_id.as_deref())));
         let from_disk = disk.as_ref().and_then(|(dc, k)| dc.get_frame(*k));
         let disk_hit = from_disk.is_some();
         let ci = match from_disk {
@@ -1428,7 +1467,7 @@ mod tests {
         assert_eq!(frames.content_key_jobs.lock().unwrap().pending.len(), 1);
         release.send(()).unwrap();
         let until = Instant::now() + Duration::from_secs(3);
-        while !frames.content_keys.lock().unwrap().contains_key(&(base.revision, base.comp)) {
+        while !frames.content_keys.lock().unwrap().contains_key(&(base.revision, base.comp, 0)) {
             assert!(Instant::now() < until);
             std::thread::sleep(Duration::from_millis(1));
         }
