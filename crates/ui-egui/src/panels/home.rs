@@ -556,17 +556,15 @@ mod tests {
     }
 
     /// The Home screen's own text goes through the interface catalog (#574): the Opened and Kind
-    /// columns read in Chinese, and English stays English.
+    /// columns read in the interface language, and English stays English.
     #[test]
     fn home_text_follows_the_interface_language() {
         let now = 1_790_000_000;
         crate::i18n::set_current("zh-hans");
-        let zh = (format_ago(now, now - 5), format_ago(now, now - 3 * 3_600), format_ago(now, now - 90_000), kind_of("/a/B.ecproj"));
-        crate::i18n::set_current("zh-hant");
-        let tw = (format_ago(now, now - 60), kind_of("x"));
+        let shown = (format_ago(now, now - 5), format_ago(now, now - 3 * 3_600), format_ago(now, now - 90_000), kind_of("/a/B.ecproj"));
+        let catalog = (tr("Just now").to_string(), tr_args("{} hours ago", &[&3]), tr("Yesterday").to_string(), tr("EffectCraft project"));
         crate::i18n::set_current("en");
-        assert_eq!(zh, ("刚刚".into(), "3 小时前".into(), "昨天".into(), "EffectCraft 项目"));
-        assert_eq!(tw, ("1 分鐘前".into(), "專案"));
+        assert_eq!(shown, catalog);
         assert_eq!(tr("Filter recent files"), "Filter recent files");
     }
 

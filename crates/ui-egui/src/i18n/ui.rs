@@ -12,6 +12,9 @@
 //! A row that carries values keeps one `{}` per value and is read with [`tr_args`]; the tests below
 //! refuse a row whose placeholder count differs from its English source, so a translation can never
 //! drop a value, and `tr_args` itself cannot panic.
+//!
+//! A language may lack rows: the English source shows instead, and the `missing_translations_report`
+//! test (run by `cargo xtask ci`) lists what each language lacks.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -37,6 +40,18 @@ pub(crate) fn current() -> &'static str {
 
 type Index = HashMap<&'static str, &'static str>;
 
+/// Every language with panel rows, for the tests and the missing-strings report.
+#[cfg(test)]
+const ROWS: &[(&str, &[(&str, &str)])] = &[
+    ("ja", JAPANESE),
+    ("zh-hans", SIMPLIFIED_CHINESE),
+    ("zh-hant", TRADITIONAL_CHINESE),
+    ("uk", UKRAINIAN),
+    ("pt-br", PORTUGUESE),
+    ("cs", CZECH),
+    ("es", SPANISH),
+];
+
 /// The catalog for `language`, indexed by English source (built on first use: panels translate
 /// hundreds of strings a frame); `None` for English and any language that has no rows yet.
 fn catalog(language: &str) -> Option<&'static Index> {
@@ -58,6 +73,15 @@ fn catalog(language: &str) -> Option<&'static Index> {
         _ => return None,
     };
     Some(index.get_or_init(|| rows.iter().copied().collect()))
+}
+
+/// The panel strings `language` has no row for (every English source any catalog lists), in
+/// catalog order, for the missing-strings report.
+#[cfg(test)]
+pub(super) fn missing(language: &str) -> Vec<&'static str> {
+    let table = catalog(language);
+    let mut seen = std::collections::HashSet::new();
+    ROWS.iter().flat_map(|(_, rows)| rows.iter().map(|(en, _)| *en)).filter(|en| seen.insert(*en) && !table.is_some_and(|c| c.contains_key(en))).collect()
 }
 
 /// Translate one interface string: the current language's row for `text`, or `text` itself.
@@ -85,7 +109,7 @@ pub(crate) fn tr_args(text: &str, args: &[&dyn Display]) -> String {
     out
 }
 
-/// Japanese: the same rows, in the same order, as the Chinese catalogs below (the tests keep the two in step).
+/// Japanese: the same rows, in the same order, as the Chinese catalogs below.
 const JAPANESE: &[(&str, &str)] = &[
     ("Appearance Settings…", "外観設定…"),
     ("Add to favorites", "お気に入りに追加"),
@@ -2027,59 +2051,10 @@ const TRADITIONAL_CHINESE: &[(&str, &str)] = &[
     ("⌘/Ctrl-drag a pin to record its motion", "⌘/Ctrl 拖曳釘選點可記錄其運動"),
     ("▣ {}", "▣ {}"),
     ("⚠ {} is used by:", "⚠ {} 已被以下專案使用："),
-    // The same rows as the Simplified catalog (the tests require both lists to match). The
-    // Traditional wording is the translator's call and is left as the English source for now.
-    ("3D Reference Axes", "3D Reference Axes"),
-    ("Affect all layers that use this solid", "Affect all layers that use this solid"),
-    ("Choose grid and guide options", "Choose grid and guide options"),
-    ("Colorize", "Colorize"),
-    ("Custom", "Custom"),
-    ("Custom...", "Custom..."),
-    ("Fit", "Fit"),
-    ("Fit up to 100%", "Fit up to 100%"),
-    ("Full", "Full"),
-    ("Half", "Half"),
-    ("Only this layer uses this solid.", "Only this layer uses this solid."),
-    ("Proportional Grid", "Proportional Grid"),
-    ("Quarter", "Quarter"),
-    ("Region of Interest", "Region of Interest"),
-    ("Reset Exposure", "Reset Exposure"),
-    ("Show Channel and Color Management Settings", "Show Channel and Color Management Settings"),
-    ("Show Snapshot (hold)", "Show Snapshot (hold)"),
-    ("Take Snapshot", "Take Snapshot"),
-    ("Third", "Third"),
-    ("Toggle Mask and Shape Path Visibility", "Toggle Mask and Shape Path Visibility"),
-    ("Toggle Transparency Grid", "Toggle Transparency Grid"),
-    ("16 bits per channel", "16 bits per channel"),
-    ("32 bits per channel (float)", "32 bits per channel (float)"),
-    ("8 bits per channel", "8 bits per channel"),
-    ("Adaptive Resolution", "Adaptive Resolution"),
-    ("Adobe-style built-in", "Adobe-style built-in"),
     ("Blue", "藍色"),
-    ("Current Settings", "Current Settings"),
-    ("Disable Per-character 3D", "Disable Per-character 3D"),
-    ("Draft", "Draft"),
-    ("Enable Per-character 3D", "Enable Per-character 3D"),
-    ("Fast Draft", "Fast Draft"),
-    ("Fast Previews (Draft 3D, Faster Effects)", "Fast Previews (Draft 3D, Faster Effects)"),
     ("Green", "綠色"),
-    ("Import Image Sequence", "Import Image Sequence"),
-    ("Import PDF / Illustrator File", "Import PDF / Illustrator File"),
-    ("Import Photoshop File", "Import Photoshop File"),
-    ("Interpret Unlabeled Alpha As", "Interpret Unlabeled Alpha As"),
     ("Join the ArtCraft Discord", "加入 ArtCraft Discord"),
-    ("Mercury GPU Acceleration ({})", "Mercury GPU Acceleration ({})"),
-    ("Mercury Software Only", "Mercury Software Only"),
-    ("OCIO (built-in ACES config)", "OCIO (built-in ACES config)"),
-    ("Off (Final Quality)", "Off (Final Quality)"),
-    ("OpenGL (compatibility)", "OpenGL (compatibility)"),
-    ("Opus Bitrate: {} kbps", "Opus Bitrate: {} kbps"),
-    ("RGB Straight", "RGB Straight"),
     ("Red", "紅色"),
-    ("Tone map", "Tone map"),
-    ("Use In-Window Menu Bar on macOS", "Use In-Window Menu Bar on macOS"),
-    ("Wireframe", "Wireframe"),
-    ("sRGB IEC61966-2.1 (default)", "sRGB IEC61966-2.1 (default)"),
     // The Home screen (#574).
     ("New Project", "新增專案"),
     ("Open Project…", "開啟專案…"),
@@ -4443,7 +4418,7 @@ mod tests {
     use super::*;
 
     /// The interface text that has moved into this catalog. Add a panel here when you convert it;
-    /// the tests below then keep it translated.
+    /// `every_row_is_used_by_a_converted_panel` then looks for its rows' English sources in it.
     const CONVERTED: &[(&str, &str)] = &[
         ("color_picker.rs", include_str!("../color_picker.rs")),
         ("credits.rs", include_str!("../credits.rs")),
@@ -4500,86 +4475,31 @@ mod tests {
         ("panels/viewers.rs", include_str!("../panels/viewers.rs")),
         // Text the interface draws but does not own: the settings pages and the viewer's channel
         // and Fast Previews lists come from the engine as data, so their source strings live here.
-        // Both files pass the literal scan below unchanged (they hold no drawn literals).
         ("engine settings pages", include_str!("../../../engine/src/prefs.rs")),
         ("engine viewer channels", include_str!("../../../engine/src/viewer.rs")),
         ("engine viewer commands", include_str!("../../../engine/src/commands/viewer_cmds.rs")),
     ];
 
-    /// Call shapes that hand a string literal straight to the user.
-    const CALLS: &[&str] = &[
-        ".label(\"",
-        ".button(\"",
-        ".small(\"",
-        ".strong(\"",
-        ".heading(\"",
-        ".monospace(\"",
-        ".on_hover_text(\"",
-        ".on_disabled_hover_text(\"",
-        ".hint_text(\"",
-        ".text(\"",
-        ".prefix(\"",
-        ".suffix(\"",
-        "RichText::new(\"",
-        "Label::new(\"",
-        "Button::new(\"",
-        "Window::new(\"",
-        "CollapsingHeader::new(\"",
-    ];
-
-    /// Literals that stay as they are: a unit or a separator reads the same in every language.
-    const UNITS: &[&str] = &[" px", "%", "·", "s", "ms", "°", "fps", " bpc", " mm", " s", " %", " pixels"];
-
     fn catalogs() -> Vec<(&'static str, &'static str)> {
-        JAPANESE
-            .iter()
-            .copied()
-            .chain(SIMPLIFIED_CHINESE.iter().copied())
-            .chain(TRADITIONAL_CHINESE.iter().copied())
-            .chain(UKRAINIAN.iter().copied())
-            .chain(PORTUGUESE.iter().copied())
-            .chain(CZECH.iter().copied())
-            .chain(SPANISH.iter().copied())
-            .collect()
+        ROWS.iter().flat_map(|(_, rows)| rows.iter().copied()).collect()
     }
 
-    #[test]
-    fn czech_panels_translate_and_keep_project_content_and_argument_order() {
-        set_current("cs");
-        assert_eq!(tr("Composition Name:"), "Název kompozice:");
-        assert_eq!(tr("Cancel"), "Zrušit");
-        assert_eq!(tr("Guide Layer"), "Pomocná vrstva", "the layer context menus' item, as Layer ▸ Guide Layer");
-        assert_eq!(tr("my layer.mp4"), "my layer.mp4");
-        assert_eq!(tr_args("Proxy Use: {}", &[&"Best"]), "Použití zástupných souborů: Best");
-        assert_eq!(tr_args("Step {} of {}: {}", &[&1, &3, &"Colour"]), "Krok 1 z 3: Colour");
-        assert_eq!(tr_args("Template: {}\n{}", &[&"Title", &"My description"]), "Šablona: Title\nMy description");
-        assert_eq!(tr_args("Leave all attributes in \"{}\"", &[&"File Čeština"]), "Ponechat všechny atributy v „File Čeština“");
-        assert_eq!(
-            tr_args("{} — double-click to open, {}-click to reveal", &[&"File.ecproj", &"Alt"]),
-            "File.ecproj — dvojklikem otevřete, kliknutím s Alt zobrazíte umístění"
-        );
-        assert_eq!(tr_args("Proxy Use: {}", &[]), "Použití zástupných souborů: ");
-        set_current("en");
-        assert_eq!(tr("Composition Name:"), "Composition Name:");
+    /// `en`'s row in `rows`, else `en`: what `tr` should return without pinning one wording.
+    fn row(rows: &[(&'static str, &'static str)], en: &'static str) -> &'static str {
+        rows.iter().find(|(source, _)| *source == en).map_or(en, |(_, translated)| *translated)
     }
 
     /// A row that translates nothing, repeats a source string, or changes the number of values the
     /// English source carries is a bug in the catalog itself.
     #[test]
     fn catalogs_are_unique_and_keep_the_english_shape() {
-        let hans: Vec<&str> = SIMPLIFIED_CHINESE.iter().map(|(en, _)| *en).collect();
-        let hant: Vec<&str> = TRADITIONAL_CHINESE.iter().map(|(en, _)| *en).collect();
-        assert_eq!(hans, hant, "the two Chinese catalogs list different source strings");
-        // Japanese, Ukrainian and Czech may lag the Chinese catalogs: a missing row falls back to English.
-        for (name, cat) in [("Japanese", JAPANESE), ("Ukrainian", UKRAINIAN), ("Brazilian Portuguese", PORTUGUESE), ("Czech", CZECH), ("Spanish", SPANISH)] {
-            let extra: Vec<&str> = cat.iter().map(|(en, _)| *en).filter(|en| !hans.contains(en)).collect();
-            assert!(extra.is_empty(), "the {name} catalog lists source strings the Chinese ones don't: {extra:?}");
+        for (code, rows) in ROWS {
+            let mut sources: Vec<&str> = rows.iter().map(|(en, _)| *en).collect();
+            sources.sort_unstable();
+            let listed = sources.len();
+            sources.dedup();
+            assert_eq!(listed, sources.len(), "{code}: a source string is listed twice");
         }
-        let mut sorted = hans.clone();
-        sorted.sort_unstable();
-        let listed = sorted.len();
-        sorted.dedup();
-        assert_eq!(listed, sorted.len(), "a source string is listed twice");
         for (en, translated) in catalogs() {
             assert!(!en.is_empty() && !translated.is_empty(), "empty row for {en:?}");
             assert!(en.contains("{}") || !en.contains('{'), "{en:?} has a placeholder but no `{{}}`");
@@ -4596,78 +4516,28 @@ mod tests {
         set_current("xx"); // a language without rows
         assert_eq!(tr("Composition Name:"), "Composition Name:");
         set_current("zh-hans");
-        assert_eq!(tr("Composition Name:"), "合成名称：");
+        assert_eq!(tr("Composition Name:"), row(SIMPLIFIED_CHINESE, "Composition Name:"));
         assert_eq!(tr("my layer.mp4"), "my layer.mp4");
         set_current("en");
-    }
-
-    /// The same language preference used for the menus reaches panels immediately, and formatted
-    /// text keeps the caller's values intact even when they contain non-Ukrainian words.
-    #[test]
-    fn ukrainian_panels_translate_and_keep_project_content() {
-        set_current("uk");
-        assert_eq!(tr("Composition Name:"), "Назва композиції:");
-        assert_eq!(tr("Cancel"), "Скасувати");
-        assert_eq!(tr("my layer.mp4"), "my layer.mp4");
-        assert_eq!(tr_args("Proxy Use: {}", &[&"Best"]), "Використання проксі: Best");
-        assert_eq!(tr_args("Step {} of {}: {}", &[&1, &3, &"Colour"]), "Крок 1 з 3: Colour");
-        assert_eq!(tr_args("Template: {}\n{}", &[&"Title", &"My description"]), "Шаблон: Title\nMy description");
-        set_current("en");
-        assert_eq!(tr("Composition Name:"), "Composition Name:");
-    }
-
-    /// Brazilian Portuguese panels translate, fill values in order and keep project content.
-    #[test]
-    fn brazilian_portuguese_panels_translate_and_keep_project_content() {
-        set_current("pt-br");
-        assert_eq!(tr("Composition Name:"), "Nome da composição:");
-        assert_eq!(tr("Cancel"), "Cancelar");
-        assert_eq!(tr("my layer.mp4"), "my layer.mp4");
-        assert_eq!(tr_args("Step {} of {}: {}", &[&1, &3, &"Colour"]), "Etapa 1 de 3: Colour");
-        assert_eq!(tr("   OK   "), "   OK   ");
-        set_current("en");
-        assert_eq!(tr("Cancel"), "Cancel");
-    }
-
-    /// Spanish panels translate, fill values in order and keep project content.
-    #[test]
-    fn spanish_panels_translate_and_keep_project_content() {
-        set_current("es");
-        assert_eq!(tr("Composition Name:"), "Nombre de la composición:");
-        assert_eq!(tr("Cancel"), "Cancelar");
-        assert_eq!(tr("my layer.mp4"), "my layer.mp4");
-        assert_eq!(tr_args("Step {} of {}: {}", &[&1, &3, &"Colour"]), "Paso 1 de 3: Colour");
-        set_current("en");
-        assert_eq!(tr("Cancel"), "Cancel");
     }
 
     /// Values fill the placeholders in order, and a missing value is dropped instead of panicking.
     #[test]
     fn tr_args_fills_values_in_order() {
         set_current("zh-hans");
-        assert_eq!(tr_args("Proxy Use: {}", &[&"Best"]), "代理使用：Best");
-        assert_eq!(tr_args("Step {} of {}: {}", &[&1, &3, &"Colour"]), "第 1 步，共 3 步：Colour");
-        assert_eq!(tr_args("Proxy Use: {}", &[]), "代理使用：");
+        let template = row(SIMPLIFIED_CHINESE, "Proxy Use: {}");
+        assert_eq!(tr_args("Proxy Use: {}", &[&"Best"]), template.replacen("{}", "Best", 1));
+        assert_eq!(tr_args("Proxy Use: {}", &[]), template.replacen("{}", "", 1));
         set_current("en");
+        assert_eq!(tr_args("Step {} of {}: {}", &[&1, &3, &"Colour"]), "Step 1 of 3: Colour");
         assert_eq!(tr_args("Proxy Use: {}", &[&"Best"]), "Proxy Use: Best");
+        assert_eq!(tr_args("Proxy Use: {}", &[]), "Proxy Use: ");
     }
 
-    /// Japanese reads its own rows: values fill the placeholders in order, and a name that is not a
-    /// row (a layer or file name) stays verbatim.
-    #[test]
-    fn japanese_rows_translate_the_panels() {
-        set_current("ja");
-        assert_eq!(tr("Composition Name:"), "コンポジション名:");
-        assert_eq!(tr("my layer.mp4"), "my layer.mp4");
-        assert_eq!(tr_args("Proxy Use: {}", &[&"Best"]), "プロキシの使用：Best");
-        assert_eq!(tr_args("Step {} of {}: {}", &[&1, &3, &"Colour"]), "ステップ1/3：Colour");
-        set_current("en");
-    }
-
-    /// Every row is asked for by a converted panel: a leftover row means the panel went back to its
-    /// English literal. A string a helper draws for the panel (a toolbar tooltip, a popup item, a
-    /// checkbox label) is looked up inside that helper, so its English source only appears as a
-    /// literal there - `helper_labels_are_translated` keeps those helpers honest.
+    /// Every row is asked for by a converted panel: a leftover row is stale, because the panel's
+    /// English source changed or went away. A string a helper draws for the panel (a toolbar
+    /// tooltip, a popup item, a checkbox label) is looked up inside that helper, so its English
+    /// source only appears as a literal there.
     #[test]
     fn every_row_is_used_by_a_converted_panel() {
         for (en, _) in catalogs() {
@@ -4678,86 +4548,6 @@ mod tests {
                 CONVERTED.iter().any(|(_, src)| src.contains(&plain) || src.contains(&formatted) || src.contains(&bare)),
                 "{en:?} is in the catalog but no converted panel asks for it"
             );
-        }
-    }
-
-    /// A label that a helper takes as an argument is drawn by the helper, so the helper has to ask
-    /// the catalog: `Checkbox::new` and `RadioButton::new` are not among the scanned call shapes
-    /// (the label is their second argument), which let the solid dialog's checkbox ship in English.
-    #[test]
-    fn helper_labels_are_translated() {
-        for (path, source) in CONVERTED {
-            for marker in ["Checkbox::new(", "RadioButton::new("] {
-                let mut from = 0;
-                while let Some(at) = source[from..].find(marker) {
-                    let at = from + at;
-                    let rest = &source[at + marker.len()..];
-                    let line = &rest[..rest.find('\n').unwrap_or(rest.len())];
-                    if let Some(q) = line.find('"') {
-                        let before = line[..q].trim_end();
-                        assert!(before.ends_with("tr("), "{path}: the `{marker}` label `{}` is not in the catalog", &line[q..]);
-                    }
-                    from = at + marker.len();
-                }
-            }
-        }
-    }
-
-    /// The Settings pages come from the engine as data, so the literal scan above cannot see them:
-    /// every title, section, label, choice, button, note and unit they draw needs a Chinese row
-    /// (#1178). Language names are written in their own language, and a few labels read the same
-    /// everywhere.
-    #[test]
-    fn settings_pages_are_translated() {
-        use effectcraft_engine::prefs::{Item, Kind, LANGUAGES, pages};
-        const VERBATIM: &[&str] = &["", "3D", "1/2", "1/4", "1/8", "sRGB", "Display P3", "px", "s", "%", "MB", "GB", "Hz", "pt"];
-        let mut drawn = Vec::new();
-        for page in pages() {
-            drawn.push(page.title);
-            for item in page.items {
-                match item {
-                    Item::Section(text) | Item::Note(text) | Item::Button { label: text, .. } => drawn.push(text),
-                    Item::Setting { label, kind, .. } => {
-                        drawn.push(label);
-                        match kind {
-                            Kind::Int(_, _, unit) | Kind::Float(_, _, unit) => drawn.push(unit),
-                            Kind::Choice(options) => drawn.extend(options.iter().map(|(l, _)| *l)),
-                            _ => {}
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        drawn.push("Stored, but not used by EffectCraft yet");
-        let languages: Vec<&str> = LANGUAGES.iter().map(|(l, _)| *l).filter(|l| *l != "Match System").collect();
-        let hans: HashMap<&str, &str> = SIMPLIFIED_CHINESE.iter().copied().collect();
-        let mut missing: Vec<&str> = drawn.into_iter().filter(|en| !VERBATIM.contains(en) && !languages.contains(en) && !hans.contains_key(en)).collect();
-        missing.sort_unstable();
-        missing.dedup();
-        assert!(missing.is_empty(), "Settings text with no Simplified Chinese row: {missing:?}");
-    }
-
-    /// A newly hard-coded interface string fails here instead of shipping in English to every
-    /// language. It is a heuristic - it looks at the call shapes the panels use - and it ignores
-    /// one-character literals, which are punctuation or a key name rather than a sentence.
-    #[test]
-    fn converted_panels_have_no_unwrapped_literals() {
-        for (path, source) in CONVERTED {
-            for (n, line) in source.lines().enumerate() {
-                let code = line.split("//").next().unwrap_or(line);
-                for call in CALLS {
-                    let Some(at) = code.find(call) else { continue };
-                    let rest = &code[at + call.len()..];
-                    let Some(end) = rest.find('"') else { continue };
-                    let literal = &rest[..end];
-                    assert!(
-                        literal.chars().count() < 2 || UNITS.contains(&literal),
-                        "{path}:{}: interface text `{literal}` in `{call}` is not in the catalog",
-                        n + 1
-                    );
-                }
-            }
         }
     }
 }

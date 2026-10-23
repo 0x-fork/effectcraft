@@ -427,6 +427,8 @@ fn tests() -> Result<(), String> {
         println!("cargo-nextest not found, running cargo test (install: cargo install cargo-nextest --locked)");
         runs.push(run(Command::new(cargo).arg("test").args(targets)));
     }
+    // The test runs above hide a passing test's output, so the always-passing report runs again with --nocapture.
+    runs.push(run(Command::new(cargo).args(["test", "-p", "effectcraft-ui-egui", "--lib", "missing_translations_report", "--", "--nocapture"])));
     runs.push(run(Command::new(cargo).args(["test", "--workspace", "--doc", "--no-fail-fast"])));
     let failed: Vec<String> = runs.into_iter().filter_map(Result::err).collect();
     if failed.is_empty() { Ok(()) } else { Err(failed.join("; ")) }

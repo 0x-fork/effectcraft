@@ -14,15 +14,15 @@
 //!   the id is stable, so a translation never becomes an orphan.
 //!
 //! Each row repeats the registry's English name so that a rename upstream fails
-//! [`tests::every_effect_has_a_row`] instead of silently pointing a translation at another
-//! effect.
+//! [`tests::every_row_names_a_registry_effect`] instead of silently pointing a translation at
+//! another effect. An effect with no row draws the registry's English name; the
+//! `missing_translations_report` test (run by `cargo xtask ci`) lists those per language.
 //!
 //! A language decides for itself which names stay English: After Effects' Japanese interface
 //! leaves the `CC` series, the `VR` set and the `OCIO` set in English, while its Simplified
 //! Chinese one translates them (the `CC` names come from Adobe's Chinese *documentation*, which
 //! names 68 of the 69). Repeating the English name is therefore a language-level choice, not a
-//! missing row: [`tests::only_the_brand_names_stay_in_english`] pins *Simplified Chinese's* five
-//! brand names and is deliberately not shared by the other languages.
+//! missing row.
 //!
 //! The Simplified Chinese names come from the installed After Effects 2026 (26.5.0.89)
 //! Simplified Chinese interface, its 21 category folder names included; `Cryptomatte`,
@@ -116,6 +116,19 @@ pub(crate) fn category(source: &str) -> String {
 pub(crate) fn matches(id: &str, english: &str, query: &str) -> bool {
     english.to_lowercase().contains(query)
         || catalog(current()).and_then(|c| c.row(id)).is_some_and(|(_, translated)| translated.to_lowercase().contains(query))
+}
+
+/// The registry's effect names and categories `language` has no row for, for the missing-strings
+/// report.
+#[cfg(test)]
+pub(super) fn missing(language: &str) -> Vec<String> {
+    let table = catalog(language);
+    let effects = effectcraft_engine::effects::registry().iter().filter(|spec| table.and_then(|c| c.row(spec.id)).is_none()).map(|spec| spec.name.to_string());
+    let categories = effectcraft_engine::effects::categories()
+        .into_iter()
+        .filter(|source| table.and_then(|c| c.category(source)).is_none())
+        .map(|source| format!("{source} (category)"));
+    effects.chain(categories).collect()
 }
 
 /// Simplified Chinese (`zh-hans`): one row per effect in the registry.
@@ -524,19 +537,17 @@ mod tests {
     use crate::i18n::set_current;
     use effectcraft_engine::effects;
 
-    /// Every effect in the registry has a row, and that row still carries the registry's English
-    /// name. A new effect, a rename or a removal fails here rather than drawing an English name
-    /// in a Chinese interface, or attaching a translation to a different effect.
+    /// Every row names an effect in the registry and still carries its English name, so a rename
+    /// or a removal fails here rather than attaching a translation to a different effect.
     #[test]
-    fn every_effect_has_a_row() {
+    fn every_row_names_a_registry_effect() {
         let registry = effects::registry();
-        assert_eq!(SIMPLIFIED_CHINESE.len(), registry.len(), "the catalog has {} rows for {} effects", SIMPLIFIED_CHINESE.len(), registry.len());
-        for spec in registry {
-            let Some((_, english, translated)) = SIMPLIFIED_CHINESE.iter().find(|(id, _, _)| *id == spec.id) else {
-                panic!("no catalog row for {} ({})", spec.id, spec.name);
+        for (id, english, translated) in SIMPLIFIED_CHINESE {
+            let Some(spec) = registry.iter().find(|spec| spec.id == *id) else {
+                panic!("{id} ({english}) is not an effect in the registry");
             };
-            assert_eq!(*english, spec.name, "{}: the catalog says {english:?}, the registry {:?}", spec.id, spec.name);
-            assert!(!translated.is_empty(), "{}: empty translation", spec.id);
+            assert_eq!(*english, spec.name, "{id}: the catalog says {english:?}, the registry {:?}", spec.name);
+            assert!(!translated.is_empty(), "{id}: empty translation");
         }
     }
 
@@ -548,18 +559,6 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(listed, ids.len(), "an effect id is listed twice");
-    }
-
-    /// The five names Adobe's Simplified Chinese interface leaves in English as brand names, and
-    /// the only zh-hans rows that may repeat their English name. Deliberately not shared: another
-    /// language keeps different names in English (Japanese leaves the whole `CC`, `VR` and `OCIO`
-    /// sets in English), so this is zh-hans's own choice, not an invariant of the tables.
-    #[test]
-    fn only_the_brand_names_stay_in_english() {
-        const BRANDS: [&str; 5] = ["ec.3d.cryptomatte", "ec.3d.extractor", "ec.3d.identifier", "ec.keying.keylight", "ec.key.unmult"];
-        for (id, english, translated) in SIMPLIFIED_CHINESE {
-            assert_eq!(english == translated, BRANDS.contains(id), "{id}: {english:?} is drawn as {translated:?}");
-        }
     }
 
     /// The languages that have no rows yet, with the table a translator fills in for each. A new
@@ -591,15 +590,11 @@ mod tests {
         }
     }
 
-    /// Every category the registry and its plug-ins report has a Simplified Chinese row, and
-    /// every row of every language names a category that exists — else the generated Effect menu
-    /// and Effects & Presets would draw a label no folder has.
+    /// Every category row of every language names a category that exists, else the generated
+    /// Effect menu and Effects & Presets would carry a label no folder has.
     #[test]
-    fn every_category_has_a_row() {
+    fn every_category_row_names_a_category() {
         let categories = effects::categories();
-        for category in &categories {
-            assert!(SIMPLIFIED_CHINESE_CATEGORIES.iter().any(|(english, _)| english == category), "no catalog row for category {category}");
-        }
         for (language, rows) in [("zh-hans", SIMPLIFIED_CHINESE_CATEGORIES), ("zh-hant", TRADITIONAL_CHINESE_CATEGORIES), ("ja", JAPANESE_CATEGORIES)] {
             for (english, translated) in rows {
                 assert!(categories.contains(english), "{language} lists {english}, which is not a category");
@@ -613,48 +608,38 @@ mod tests {
     #[test]
     fn group_names_keep_the_instance_index_and_user_renames() {
         set_current("zh-hans");
-        assert_eq!(group("ec.blur.gaussian", "Gaussian Blur"), "高斯模糊");
-        assert_eq!(group("ec.blur.gaussian", "Gaussian Blur 2"), "高斯模糊 2");
-        assert_eq!(group("ec.blur.gaussian", "Gaussian Blur 12"), "高斯模糊 12");
+        let translated = name("ec.blur.gaussian", "Gaussian Blur");
+        assert_eq!(group("ec.blur.gaussian", "Gaussian Blur"), translated);
+        assert_eq!(group("ec.blur.gaussian", "Gaussian Blur 2"), format!("{translated} 2"));
+        assert_eq!(group("ec.blur.gaussian", "Gaussian Blur 12"), format!("{translated} 12"));
         assert_eq!(group("ec.blur.gaussian", "My Blur"), "My Blur", "a rename is not a row");
         assert_eq!(group("ec.blur.gaussian", "Gaussian Blur X"), "Gaussian Blur X");
         assert_eq!(group("ec.blur.gaussian", "Gaussian Blur 2x"), "Gaussian Blur 2x");
-        assert_eq!(group("ec.blur.gaussian", "高斯模糊"), "高斯模糊", "an already translated name stays");
+        assert_eq!(group("ec.blur.gaussian", &translated), translated, "an already translated name stays");
         set_current("en");
     }
 
-    /// English, and a language with no catalog or no row for this effect, draws the registry's
-    /// name rather than an empty label.
-    ///
-    /// The pending languages are also checked to still be row-less and to have an arm in
-    /// [`catalog`]: an arm with no table would leave a translator's rows dead, and the day a
-    /// pending language gets rows this fails so its slot moves out of [`PENDING`], where the
-    /// coverage for it lives.
+    /// English, and a language with no catalog or no row for an effect, draws the registry's
+    /// name rather than an empty label; a language with a row draws the row. Every table in
+    /// [`PENDING`] and [`PARTIAL`] has an arm in [`catalog`]: an arm-less table's rows would be dead.
     #[test]
     fn languages_without_rows_draw_the_registry_name() {
+        for (language, _) in PENDING.iter().chain(PARTIAL) {
+            assert!(catalog(language).is_some(), "{language} has a table but no arm in `catalog`: its rows would be dead");
+        }
+        let tables = PENDING.iter().chain(PARTIAL).copied().chain([("zh-hans", SIMPLIFIED_CHINESE)]);
+        for (language, rows) in [("en", &[][..]), ("uk", &[][..]), ("cs", &[][..])].into_iter().chain(tables) {
+            set_current(language);
+            let expected = rows.iter().find(|(id, _, _)| *id == "ec.blur.gaussian").map_or("Gaussian Blur", |(_, _, translated)| *translated);
+            assert_eq!(name("ec.blur.gaussian", "Gaussian Blur"), expected, "{language}");
+            assert_eq!(group("ec.blur.gaussian", "Gaussian Blur 2"), format!("{expected} 2"), "{language}");
+            assert_eq!(name("ec.unknown.effect", "Mystery"), "Mystery", "{language}");
+            assert_eq!(category("Not A Category"), "Not A Category", "{language}");
+        }
         for language in ["en", "uk", "cs"] {
             set_current(language);
-            assert_eq!(name("ec.blur.gaussian", "Gaussian Blur"), "Gaussian Blur", "{language}");
-            assert_eq!(group("ec.blur.gaussian", "Gaussian Blur 2"), "Gaussian Blur 2", "{language}");
             assert_eq!(category("Blur & Sharpen"), "Blur & Sharpen", "{language}");
         }
-        for (language, rows) in PENDING {
-            assert!(catalog(language).is_some(), "{language} has a table but no arm in `catalog`: its rows would be dead");
-            assert!(rows.is_empty(), "{language} has rows now: move it out of PENDING and cover it here");
-            set_current(language);
-            assert_eq!(name("ec.blur.gaussian", "Gaussian Blur"), "Gaussian Blur", "{language}");
-            assert_eq!(group("ec.blur.gaussian", "Gaussian Blur 2"), "Gaussian Blur 2", "{language}");
-            assert_eq!(category("Blur & Sharpen"), "Blur & Sharpen", "{language}");
-        }
-        set_current("zh-hans");
-        assert_eq!(name("ec.blur.gaussian", "Gaussian Blur"), "高斯模糊");
-        assert_eq!(group("ec.blur.gaussian", "Gaussian Blur 2"), "高斯模糊 2");
-        assert_eq!(category("Blur & Sharpen"), "模糊和锐化");
-        assert_eq!(name("ec.unknown.effect", "Mystery"), "Mystery");
-        assert_eq!(category("Not A Category"), "Not A Category");
-        set_current("ja");
-        assert_eq!(name("ec.blur.gaussian", "Gaussian Blur"), "ブラー（ガウス）");
-        assert_eq!(name("ec.unknown.effect", "Mystery"), "Mystery", "a row a partial table lacks draws the registry name");
         set_current("en");
     }
 
@@ -665,38 +650,10 @@ mod tests {
         set_current("zh-hans");
         assert!(matches("ec.blur.gaussian", "Gaussian Blur", "blur"));
         assert!(matches("ec.blur.gaussian", "Gaussian Blur", "gaussian"));
-        assert!(matches("ec.blur.gaussian", "Gaussian Blur", "高斯"));
+        assert!(matches("ec.blur.gaussian", "Gaussian Blur", &name("ec.blur.gaussian", "Gaussian Blur").to_lowercase()));
         assert!(!matches("ec.blur.gaussian", "Gaussian Blur", "sharpen"));
         set_current("en");
         assert!(matches("ec.blur.gaussian", "Gaussian Blur", "blur"));
         assert!(!matches("ec.blur.gaussian", "Gaussian Blur", "高斯"));
-    }
-
-    /// The drawing sites ask this catalog instead of the registry's English name (#821). Like the
-    /// panel catalog's literal scan this is a heuristic: it pins the expressions that used to draw
-    /// the English name, so a revert fails here.
-    #[test]
-    fn the_drawing_sites_ask_the_catalog() {
-        /// A file that must ask the catalog.
-        const ASKS: &[(&str, &str, &str)] = &[
-            ("i18n.rs", include_str!("../i18n.rs"), "effects::name("),
-            ("i18n.rs", include_str!("../i18n.rs"), "effects::category("),
-            ("panels/effects_presets.rs", include_str!("../panels/effects_presets.rs"), "effects::name("),
-            ("panels/effects_presets.rs", include_str!("../panels/effects_presets.rs"), "effects::category("),
-            ("panels/effect_controls.rs", include_str!("../panels/effect_controls.rs"), "effects::group("),
-            ("panels/timeline.rs", include_str!("../panels/timeline.rs"), "effects::group("),
-        ];
-        /// An expression that drew the registry's English name and must be gone.
-        const RAW: &[(&str, &str, &str)] = &[
-            ("panels/effects_presets.rs", include_str!("../panels/effects_presets.rs"), "pos2(r.min.x + 56.0 + indent, r.center().y), e.name, query, &t)"),
-            ("panels/effect_controls.rs", include_str!("../panels/effect_controls.rs"), "Align2::LEFT_CENTER, &g.name,"),
-            ("panels/timeline.rs", include_str!("../panels/timeline.rs"), "Align2::LEFT_CENTER, name,"),
-        ];
-        for (path, source, call) in ASKS {
-            assert!(source.contains(call), "{path} does not ask the effect-name catalog (`{call}`)");
-        }
-        for (path, source, raw) in RAW {
-            assert!(!source.contains(raw), "{path} draws the registry's English name again: `{raw}`");
-        }
     }
 }

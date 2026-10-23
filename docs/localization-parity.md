@@ -1,6 +1,6 @@
 # Localization parity
 
-> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (catalogs recounted at `upstream/main` 470ea7a3: menus in 10 languages, panels in 6, Hangul probe (#599)) · **Target:** Adobe After Effects 2026
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-23 · **Change:** minor (missing strings show in English; `missing_translations_report` lists them) · **Target:** Adobe After Effects 2026
 
 How much of EffectCraft's interface is translated, language by language, compared with After
 Effects. [gaps.md](gaps.md) gap 16 and workstream G9 hold the work;
@@ -17,9 +17,9 @@ interface; Arabic and Hebrew text *in layers* is supported through its Middle Ea
 ## How EffectCraft translates
 
 - **Menus:** `crates/ui-egui/src/i18n.rs`, one catalog per language keyed by
-  `(command, English label)`. A test (`every_translation_key_exists_in_the_actual_menu_tree`)
-  fails if any fixed menu entry is untranslated or a row is stale, so every catalog covers all
-  fixed entries (624 catalog rows each at 470ea7a3, counted). The generated Effect menu is not part of that fixed tree: its entries
+  `(command, English label)` (624 catalog rows each at 470ea7a3, counted). A test
+  (`menu_catalogs_have_no_stale_or_duplicate_rows`) fails on a row whose entry left the menu tree
+  or on a repeated row. The generated Effect menu is not part of that fixed tree: its entries
   and category submenus take their labels from the effect catalog below.
 - **Panels, dialogs, buttons, tooltips:** `crates/ui-egui/src/i18n/ui.rs`, keyed by the English
   source string, with English fallback. Catalogs exist for Japanese (410 rows), Simplified and
@@ -38,6 +38,12 @@ interface; Arabic and Hebrew text *in layers* is supported through its Middle Ea
   slot is for). Each language decides for itself which names stay English — Adobe's Japanese
   interface leaves the `CC`, `VR` and `OCIO` sets in English while its Chinese one translates
   them — so a row repeating the English name is a choice, not a missing row.
+- **Missing strings:** a string with no row in the interface language shows in English, and no
+  test, build or release fails on a missing translation. The `missing_translations_report` test
+  (`crates/ui-egui/src/i18n.rs`) prints, per language, the fixed menu entries, panel strings, effect
+  names and effect categories that have no row. It always passes; `cargo xtask ci` runs it with
+  `--nocapture`, so the list is in the gate log. Locally:
+  `cargo test -p effectcraft-ui-egui --lib missing_translations_report -- --nocapture`.
 - **Not translated anywhere yet:** effect *parameter* names (≈ 1,650, `crates/effects`),
   engine-generated text (property names, errors, undo labels), the Home screen's unwrapped
   literals (#574), Learn tutorials and documentation.

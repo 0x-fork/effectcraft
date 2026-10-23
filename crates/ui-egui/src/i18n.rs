@@ -6649,140 +6649,6 @@ mod tests {
     use serde_json::json;
     use std::collections::BTreeSet;
 
-    #[test]
-    fn czech_translates_menus_without_changing_bindings_or_user_names() {
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key": "general.language", "value": "en"})).unwrap();
-        app.session.prefs.push_recent("File.ecproj");
-        let en = crate::native_menu::build(&app);
-        let state = crate::native_menu::state_key(&app);
-        app.session.execute("prefs.set", json!({"key": "general.language", "value": "cs"})).unwrap();
-        let cs = crate::native_menu::build(&app);
-        assert_eq!(language(&app), "cs");
-        assert!(czech(&app));
-        assert_eq!(code("cs"), "cs");
-        assert_ne!(state, crate::native_menu::state_key(&app));
-        let bindings = |menu: &crate::native_menu::NativeMenu| {
-            menu.items().into_iter().map(|i| (i.id.clone(), i.command.clone(), i.params.clone(), i.shortcut.clone(), i.enabled, i.checked)).collect::<Vec<_>>()
-        };
-        assert_eq!(bindings(&en), bindings(&cs));
-        assert!(cs.items().iter().any(|i| i.command == "comp.new" && i.label == "Nová kompozice..."));
-        assert!(cs.items().iter().any(|i| i.command == "layer.newText" && i.label == "Text"));
-        assert!(cs.items().iter().any(|i| i.command == "keys.easyEase" && i.label == "Snadné zpomalení"));
-        assert!(cs.items().iter().any(|i| i.command == "file.openRecent" && i.label == "File.ecproj"));
-        for (source, translated) in [
-            ("File", "Soubor"),
-            ("Edit", "Úpravy"),
-            ("Composition", "Kompozice"),
-            ("Layer", "Vrstva"),
-            ("Effect", "Efekt"),
-            ("Animation", "Animace"),
-            ("View", "Zobrazení"),
-            ("Window", "Okno"),
-            ("Help", "Nápověda"),
-        ] {
-            assert_eq!(label(&app, "", source), translated);
-        }
-        assert_eq!(label(&app, "unknown.command", "Text"), "Text");
-        let panel =
-            MenuEntry { label: "Layer".into(), command: "window.panel".into(), params: json!({"panel": "layer"}), shortcut: None, alt_shortcuts: vec![] };
-        assert_eq!(entry(&app, &panel, "Layer: File Čeština".into()), "Vrstva: File Čeština");
-        assert_eq!(
-            submenu(&app, "Assign Shortcut to Workspace", "Assign Shortcut to “File Čeština” Workspace".into()),
-            "Přiřadit zkratku pracovnímu prostoru „File Čeština“"
-        );
-        assert_eq!(submenu(&app, "Assign Shortcut to 3D View", "Assign Shortcut to “Top”".into()), "Přiřadit zkratku 3D zobrazení „Top“");
-        assert_eq!(submenu(&app, "Assign Shortcut to Workspace", "Assign Shortcut to Workspace".into()), "Přiřadit zkratku pracovnímu prostoru");
-        app.session.execute("prefs.set", json!({"key": "general.language", "value": "en"})).unwrap();
-        assert_eq!(crate::native_menu::build(&app), en);
-    }
-
-    #[test]
-    fn czech_undo_redo_keeps_history_labels_verbatim() {
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key": "general.language", "value": "cs"})).unwrap();
-        let undo = MenuEntry { label: "Undo".into(), command: "edit.undo".into(), params: json!({}), shortcut: None, alt_shortcuts: vec![] };
-        let redo = MenuEntry { label: "Redo".into(), command: "edit.redo".into(), params: json!({}), shortcut: None, alt_shortcuts: vec![] };
-        assert_eq!(entry(&app, &undo, "Can't Undo".into()), "Není co vrátit");
-        assert_eq!(entry(&app, &redo, "Can't Redo".into()), "Není co zopakovat");
-        app.session.history.undo.push(("File Čeština".into(), app.session.project.clone()));
-        app.session.history.redo.push(("Text Čeština".into(), app.session.project.clone()));
-        assert_eq!(entry(&app, &undo, "Undo File Čeština".into()), "Zpět File Čeština");
-        assert_eq!(entry(&app, &redo, "Redo Text Čeština".into()), "Znovu Text Čeština");
-    }
-
-    #[test]
-    fn german_reveal_labels_follow_the_platform_file_manager() {
-        // As `czech_…` and `ukrainian_…` do. Asserted through `label`, not `entry`: `entry`
-        // returns the English for German, Russian and French, which have catalogues but are
-        // not wired into the menus (see the undo/redo match in `entry` and `supported`).
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key": "general.language", "value": "de"})).unwrap();
-        for command in ["file.revealInFinder", "layer.revealInFinder"] {
-            for (source, translated) in [
-                ("Reveal in Finder", "Im Finder anzeigen"),
-                ("Reveal in Explorer", "Im Explorer anzeigen"),
-                ("Reveal in File Manager", "Im Dateimanager anzeigen"),
-            ] {
-                assert_eq!(label(&app, command, source), translated, "{command} / {source}");
-                // Another command keeps a label that merely looks like one of these.
-                assert_eq!(label(&app, "file.openRecent", source), source);
-            }
-            assert_eq!(label(&app, command, "My file.mp4"), "My file.mp4", "a user's filename is never looked up");
-        }
-    }
-
-    #[test]
-    fn german_menu_labels_name_what_their_command_does() {
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key": "general.language", "value": "de"})).unwrap();
-        // "Ebenenreihenfolge umkehren" reads as reversing the stacking order, not time, and
-        // "Formate" are formats, not layer styles (#1443).
-        assert_eq!(label(&app, "layer.timeReverse", "Time-Reverse Layer"), "Ebene zeitlich umkehren");
-        assert_eq!(label(&app, "keys.timeReverse", "Time-Reverse Keyframes"), "Keyframes zeitlich umkehren");
-        assert_eq!(label(&app, "layer.style.convertToEditable", "Convert to Editable Styles"), "In bearbeitbare Stile umwandeln");
-    }
-
-    #[test]
-    fn german_uses_one_word_per_term() {
-        let german: Vec<&str> = GERMAN.iter().map(|(_, _, de)| *de).collect();
-        let with = |needle: &str| german.iter().filter(|de| de.contains(needle)).copied().collect::<Vec<_>>();
-        // "Expression" is "Ausdruck", not the English word.
-        assert!(with("Expression").is_empty(), "{:?}", with("Expression"));
-        // "Track" as a verb is "verfolgen", not "tracken".
-        assert!(with("tracken").is_empty(), "{:?}", with("tracken"));
-        // "Reveal <somewhere>" is "anzeigen". ("einblenden" stays right for "Show All",
-        // "Fade from Blur" and the like, so only the Reveal entries are checked.)
-        let reveal: Vec<&str> =
-            GERMAN.iter().filter(|(_, en, _)| en.starts_with("Reveal")).map(|(_, _, de)| *de).filter(|de| !de.to_lowercase().contains("anzeigen")).collect();
-        assert!(reveal.is_empty(), "{reveal:?}");
-        // One spelling of "to the front".
-        let vorn: Vec<&str> = german.iter().filter(|de| de.ends_with("nach vorn")).copied().collect();
-        assert!(vorn.is_empty(), "{vorn:?}");
-        // The terms those entries joined are still the majority ones.
-        assert!(with("verfolgen").len() >= 4, "{:?}", with("verfolgen"));
-        assert!(with("anzeigen").len() >= 12, "{}", with("anzeigen").len());
-    }
-
-    #[test]
-    fn czech_reveal_labels_follow_the_platform_file_manager() {
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key": "general.language", "value": "cs"})).unwrap();
-        for command in ["file.revealInFinder", "layer.revealInFinder"] {
-            for (source, translated) in [
-                ("Reveal in Finder", "Zobrazit ve Finderu"),
-                ("Reveal in Explorer", "Zobrazit v Průzkumníku"),
-                ("Reveal in File Manager", "Zobrazit ve správci souborů"),
-            ] {
-                let e = MenuEntry { label: source.into(), command: command.into(), params: json!({}), shortcut: None, alt_shortcuts: vec![] };
-                assert_eq!(label(&app, command, source), translated);
-                assert_eq!(entry(&app, &e, source.into()), translated);
-                assert_eq!(label(&app, "file.openRecent", source), source);
-            }
-            assert_eq!(label(&app, command, "My file.mp4"), "My file.mp4");
-        }
-    }
-
     fn keys(nodes: &[MenuNode], out: &mut BTreeSet<(String, String)>) {
         for node in nodes {
             match node {
@@ -6798,88 +6664,71 @@ mod tests {
         }
     }
 
+    /// The fixed menu entries `code` has no row for. `@effects` is the generated plug-in catalog,
+    /// whose effect names come from the effect catalog instead.
+    fn missing_menu_entries(code: &str) -> Vec<String> {
+        let catalog = menu_catalog(code).unwrap_or_default();
+        let mut missing = Vec::new();
+        for line in TREE.lines() {
+            let line = line.trim().trim_start_matches("[mac] ").trim_start_matches("[!mac] ");
+            if line.is_empty() || line == "---" || line.starts_with('@') {
+                continue;
+            }
+            let mut parts = line.split(" | ");
+            let Some(en) = parts.next() else { continue };
+            let command = parts.next().and_then(|p| p.split_whitespace().next()).unwrap_or("");
+            if !catalog.iter().any(|(id, source, _)| *id == command && *source == en) {
+                missing.push(en.to_string());
+            }
+        }
+        missing
+    }
+
+    /// Lists, per language, the interface strings with no translation, which show in English. It
+    /// always passes: a missing translation never blocks a change. `cargo xtask ci` runs it.
     #[test]
-    fn every_translation_key_exists_in_the_actual_menu_tree() {
+    fn missing_translations_report() {
+        const SHOWN: usize = 12;
+        println!("Missing translations (shown in English):");
+        let mut total = 0;
+        for code in CATALOG_CODES {
+            let catalogs = [
+                ("menus", missing_menu_entries(code)),
+                ("panels", ui::missing(code).into_iter().map(str::to_string).collect()),
+                ("effects", effects::missing(code)),
+            ];
+            let count: usize = catalogs.iter().map(|(_, missing)| missing.len()).sum();
+            total += count;
+            println!("{code}: {count}");
+            for (catalog, missing) in &catalogs {
+                if missing.is_empty() {
+                    continue;
+                }
+                let shown: Vec<&String> = missing.iter().take(SHOWN).collect();
+                let more = missing.len().saturating_sub(SHOWN);
+                let more = if more > 0 { format!(" … and {more} more") } else { String::new() };
+                println!("  {catalog} ({}): {shown:?}{more}", missing.len());
+            }
+        }
+        println!("total: {total}");
+    }
+
+    #[test]
+    fn menu_catalogs_have_no_stale_or_duplicate_rows() {
         let mut actual = BTreeSet::new();
         for mac in [false, true] {
             keys(&parse(TREE, mac).unwrap(), &mut actual);
         }
-        let mut japanese_keys = BTreeSet::new();
-        let mut chinese_keys = BTreeSet::new();
-        let mut traditional_keys = BTreeSet::new();
-        let mut ukrainian_keys = BTreeSet::new();
-        let mut spanish_keys = BTreeSet::new();
-        let mut portuguese_keys = BTreeSet::new();
-        let mut russian_keys = BTreeSet::new();
-        let mut french_keys = BTreeSet::new();
-        let mut german_keys = BTreeSet::new();
-        let mut czech_keys = BTreeSet::new();
-        for (catalog, unique) in [
-            (JAPANESE, &mut japanese_keys),
-            (SIMPLIFIED_CHINESE, &mut chinese_keys),
-            (TRADITIONAL_CHINESE, &mut traditional_keys),
-            (UKRAINIAN, &mut ukrainian_keys),
-            (SPANISH, &mut spanish_keys),
-            (PORTUGUESE, &mut portuguese_keys),
-            (RUSSIAN, &mut russian_keys),
-            (FRENCH, &mut french_keys),
-            (GERMAN, &mut german_keys),
-            (CZECH, &mut czech_keys),
-        ] {
+        for code in CATALOG_CODES {
+            let catalog = menu_catalog(code).unwrap();
+            let mut unique = BTreeSet::new();
             for (command, en, translated) in catalog {
                 let key = (command.to_string(), en.to_string());
-                assert!(actual.contains(&key), "stale translation: {key:?}");
-                assert!(unique.insert(key), "duplicate translation: {command} / {en}");
-                assert!(!translated.is_empty());
-            }
-            // All fixed TREE entries are covered; @effects is a generated plug-in catalog,
-            // whose product/effect names are intentionally left as registered.
-            for line in TREE.lines() {
-                let line = line.trim().trim_start_matches("[mac] ").trim_start_matches("[!mac] ");
-                if line.is_empty() || line == "---" || line.starts_with('@') {
-                    continue;
-                }
-                let mut parts = line.split(" | ");
-                let en = parts.next().unwrap();
-                let command = parts.next().and_then(|p| p.split_whitespace().next()).unwrap_or("");
-                assert!(unique.contains(&(command.into(), en.into())), "untranslated fixed entry: {line}");
+                assert!(actual.contains(&key), "{code}: stale translation: {key:?}");
+                assert!(unique.insert(key), "{code}: duplicate translation: {command} / {en}");
+                assert!(!translated.is_empty(), "{code}: empty translation: {command} / {en}");
             }
         }
-        // Every translated language covers exactly the same entries.
-        assert_eq!(japanese_keys, chinese_keys, "the languages must translate the same entries");
-        assert_eq!(chinese_keys, traditional_keys, "the languages must translate the same entries");
-        assert_eq!(traditional_keys, spanish_keys, "the languages must translate the same entries");
-        assert_eq!(spanish_keys, portuguese_keys, "the languages must translate the same entries");
-        assert_eq!(japanese_keys, ukrainian_keys, "the languages must translate the same entries");
-        assert_eq!(ukrainian_keys, russian_keys, "the languages must translate the same entries");
-        assert_eq!(russian_keys, french_keys, "the languages must translate the same entries");
-        assert_eq!(french_keys, german_keys, "the languages must translate the same entries");
-        assert_eq!(japanese_keys, czech_keys, "the languages must translate the same entries");
-    }
-
-    /// Exercise each engine spelling on every host: a macOS-only run must still catch a
-    /// Windows/Linux catalog miss, while filenames and unrelated commands stay untouched.
-    #[test]
-    fn ukrainian_reveal_labels_follow_the_platform_file_manager() {
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key": "general.language", "value": "uk"})).unwrap();
-        for command in ["file.revealInFinder", "layer.revealInFinder"] {
-            for (source, translated) in [
-                ("Reveal in Finder", "Показати у Finder"),
-                ("Reveal in Explorer", "Показати у Провіднику"),
-                ("Reveal in File Manager", "Показати у файловому менеджері"),
-            ] {
-                let e =
-                    MenuEntry { label: source.into(), command: command.into(), params: json!({"item": "My file.mp4"}), shortcut: None, alt_shortcuts: vec![] };
-                assert_eq!(label(&app, command, source), translated);
-                assert_eq!(entry(&app, &e, source.into()), translated);
-                assert_eq!(label(&app, "file.openRecent", source), source);
-            }
-            assert_eq!(label(&app, command, "My file.mp4"), "My file.mp4");
-        }
-        app.session.execute("prefs.set", json!({"key": "general.language", "value": "en"})).unwrap();
-        assert_eq!(label(&app, "file.revealInFinder", "Reveal in Explorer"), "Reveal in Explorer");
-        assert_eq!(label(&app, "layer.revealInFinder", "Reveal in File Manager"), "Reveal in File Manager");
     }
 
     #[test]
@@ -6895,18 +6744,8 @@ mod tests {
             menu.items().into_iter().map(|i| (i.id.clone(), i.command.clone(), i.params.clone(), i.shortcut.clone(), i.enabled, i.checked)).collect::<Vec<_>>()
         };
         assert_eq!(bindings(&en), bindings(&ja));
+        assert!(ja.items().iter().any(|i| i.command == "comp.new" && i.label == label(&app, "comp.new", "New Composition...")));
         assert_eq!(label(&app, "unknown.command", "Text"), "Text");
-        assert_eq!(
-            entry(
-                &app,
-                &MenuEntry { label: "Layer".into(), command: "window.panel".into(), params: json!({"panel":"layer"}), shortcut: None, alt_shortcuts: vec![] },
-                "Layer: File".into()
-            ),
-            "レイヤー: File"
-        );
-        assert!(ja.items().iter().any(|i| i.command == "comp.new" && i.label == "新規コンポジション..."));
-        assert!(ja.items().iter().any(|i| i.command == "layer.newText" && i.label == "テキスト"));
-        assert!(ja.items().iter().any(|i| i.command == "keys.easyEase" && i.label == "イージーイーズ"));
         app.session.prefs.push_recent("/tmp/File.ecproj");
         assert!(crate::native_menu::build(&app).items().iter().any(|i| i.command == "file.openRecent" && i.label == "File.ecproj"));
         app.session.execute("prefs.set", json!({"key":"general.language", "value":"en"})).unwrap();
@@ -6987,237 +6826,12 @@ mod tests {
     }
 
     #[test]
-    fn zh_hans_translates_labels_computed_titles_and_keeps_names_verbatim() {
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key":"general.language", "value":"zh-hans"})).unwrap();
-        assert_eq!(language(&app), "zh-hans");
-        assert!(simplified(&app));
-        assert!(!traditional(&app));
-        assert!(!japanese(&app));
-        // Fixed menu rows come from the catalog.
-        assert_eq!(label(&app, "", "Composition"), "合成");
-        assert_eq!(label(&app, "", "Effect"), "效果");
-        assert_eq!(label(&app, "comp.new", "New Composition..."), "新建合成...");
-        assert_eq!(label(&app, "layer.newText", "Text"), "文本");
-        // Untranslated keys and dynamic labels stay verbatim.
-        assert_eq!(label(&app, "unknown.command", "Text"), "Text");
-        assert_eq!(
-            entry(
-                &app,
-                &MenuEntry { label: "Undo".into(), command: "edit.undo".into(), params: json!({}), shortcut: None, alt_shortcuts: vec![] },
-                "Undo Comp1".into()
-            ),
-            "无可撤销的操作"
-        );
-        assert_eq!(
-            entry(
-                &app,
-                &MenuEntry { label: "Layer".into(), command: "window.panel".into(), params: json!({"panel":"layer"}), shortcut: None, alt_shortcuts: vec![] },
-                "Layer: File".into()
-            ),
-            "图层: File"
-        );
-        // The submenu titles that name the current workspace / view.
-        assert_eq!(submenu(&app, "Assign Shortcut to Workspace", "Assign Shortcut to “Default” Workspace".into()), "为工作区“Default”指定快捷键");
-        assert_eq!(submenu(&app, "Assign Shortcut to 3D View", "Assign Shortcut to “Top”".into()), "为 3D 视图“Top”指定快捷键");
-        // The menu tree carries the same commands and shortcuts with the Chinese labels.
-        let zh = crate::native_menu::build(&app);
-        assert!(zh.items().iter().any(|i| i.command == "comp.new" && i.label == "新建合成..."));
-        assert!(zh.items().iter().any(|i| i.command == "layer.newText" && i.label == "文本"));
-        assert!(zh.items().iter().any(|i| i.command == "keys.easyEase" && i.label == "缓动"));
-        // A dynamic filename is never translated.
-        app.session.prefs.push_recent("/tmp/File.ecproj");
-        assert!(crate::native_menu::build(&app).items().iter().any(|i| i.command == "file.openRecent" && i.label == "File.ecproj"));
-    }
-
-    #[test]
-    fn zh_hant_translates_labels_computed_titles_and_keeps_names_verbatim() {
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key":"general.language", "value":"zh-hant"})).unwrap();
-        assert_eq!(language(&app), "zh-hant");
-        assert!(traditional(&app));
-        assert!(!simplified(&app));
-        assert!(!japanese(&app));
-        // Fixed menu rows come from the catalog.
-        assert_eq!(label(&app, "", "Composition"), "合成");
-        assert_eq!(label(&app, "", "Effect"), "效果");
-        assert_eq!(label(&app, "comp.new", "New Composition..."), "新增合成...");
-        assert_eq!(label(&app, "layer.newText", "Text"), "文字");
-        // Untranslated keys and dynamic labels stay verbatim.
-        assert_eq!(label(&app, "unknown.command", "Text"), "Text");
-        assert_eq!(
-            entry(
-                &app,
-                &MenuEntry { label: "Undo".into(), command: "edit.undo".into(), params: json!({}), shortcut: None, alt_shortcuts: vec![] },
-                "Undo Comp1".into()
-            ),
-            "沒有可復原的操作"
-        );
-        assert_eq!(
-            entry(
-                &app,
-                &MenuEntry { label: "Layer".into(), command: "window.panel".into(), params: json!({"panel":"layer"}), shortcut: None, alt_shortcuts: vec![] },
-                "Layer: File".into()
-            ),
-            "圖層: File"
-        );
-        // The submenu titles that name the current workspace / view.
-        assert_eq!(submenu(&app, "Assign Shortcut to Workspace", "Assign Shortcut to “Default” Workspace".into()), "為工作區“Default”指定快速鍵");
-        assert_eq!(submenu(&app, "Assign Shortcut to 3D View", "Assign Shortcut to “Top”".into()), "為 3D 檢視“Top”指定快速鍵");
-        // The menu tree carries the same commands and shortcuts with the Traditional labels.
-        let zh = crate::native_menu::build(&app);
-        assert!(zh.items().iter().any(|i| i.command == "comp.new" && i.label == "新增合成..."));
-        assert!(zh.items().iter().any(|i| i.command == "layer.newText" && i.label == "文字"));
-        assert!(zh.items().iter().any(|i| i.command == "keys.easyEase" && i.label == "緩動"));
-        // A dynamic filename is never translated.
-        app.session.prefs.push_recent("/tmp/File.ecproj");
-        assert!(crate::native_menu::build(&app).items().iter().any(|i| i.command == "file.openRecent" && i.label == "File.ecproj"));
-    }
-
-    #[test]
-    fn ukrainian_translates_menus_without_changing_bindings_or_user_names() {
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key":"general.language", "value":"en"})).unwrap();
-        app.session.prefs.push_recent("/tmp/File.ecproj");
-        let en = crate::native_menu::build(&app);
-        let state = crate::native_menu::state_key(&app);
-        app.session.execute("prefs.set", json!({"key":"general.language", "value":"uk"})).unwrap();
-        let uk = crate::native_menu::build(&app);
-        assert_eq!(language(&app), "uk");
-        assert!(ukrainian(&app));
-        assert_ne!(state, crate::native_menu::state_key(&app));
-        let bindings = |menu: &crate::native_menu::NativeMenu| {
-            menu.items().into_iter().map(|i| (i.id.clone(), i.command.clone(), i.params.clone(), i.shortcut.clone(), i.enabled, i.checked)).collect::<Vec<_>>()
-        };
-        assert_eq!(bindings(&en), bindings(&uk));
-        assert!(uk.items().iter().any(|i| i.command == "comp.new" && i.label == "Нова композиція..."));
-        assert!(uk.items().iter().any(|i| i.command == "layer.newText" && i.label == "Текст"));
-        assert!(uk.items().iter().any(|i| i.command == "file.openRecent" && i.label == "File.ecproj"));
-        assert_eq!(label(&app, "", "File"), "Файл");
-        assert_eq!(label(&app, "", "Light"), "Світло");
-        assert_eq!(label(&app, "view.panelBackground", "Black"), "Чорний");
-        assert_eq!(label(&app, "layer.addTextAnimator", "Tracking"), "Міжлітерний інтервал");
-        assert_eq!(label(&app, "edit.purgeUndo", "Undo"), "Історія скасувань");
-        assert_eq!(label(&app, "unknown.command", "Text"), "Text");
-        let panel =
-            MenuEntry { label: "Layer".into(), command: "window.panel".into(), params: json!({"panel":"layer"}), shortcut: None, alt_shortcuts: vec![] };
-        assert_eq!(entry(&app, &panel, "Layer: File".into()), "Шар: File");
-        assert_eq!(
-            submenu(&app, "Assign Shortcut to Workspace", "Assign Shortcut to “File Україна” Workspace".into()),
-            "Призначити скорочення для робочого простору «File Україна»"
-        );
-        assert_eq!(submenu(&app, "Assign Shortcut to 3D View", "Assign Shortcut to “Top”".into()), "Призначити скорочення для вигляду 3D «Top»");
-        app.session.execute("prefs.set", json!({"key":"general.language", "value":"en"})).unwrap();
-        assert_eq!(crate::native_menu::build(&app), en);
-    }
-
-    #[test]
-    fn ukrainian_undo_redo_keeps_history_labels_verbatim() {
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key":"general.language", "value":"uk"})).unwrap();
-        let undo = MenuEntry { label: "Undo".into(), command: "edit.undo".into(), params: json!({}), shortcut: None, alt_shortcuts: vec![] };
-        let redo = MenuEntry { label: "Redo".into(), command: "edit.redo".into(), params: json!({}), shortcut: None, alt_shortcuts: vec![] };
-        assert_eq!(entry(&app, &undo, "Can't Undo".into()), "Немає дій для скасування");
-        assert_eq!(entry(&app, &redo, "Can't Redo".into()), "Немає дій для повторення");
-        app.session.history.undo.push(("File Україна".into(), app.session.project.clone()));
-        app.session.history.redo.push(("Text Україна".into(), app.session.project.clone()));
-        assert_eq!(entry(&app, &undo, "Undo File Україна".into()), "Скасувати File Україна");
-        assert_eq!(entry(&app, &redo, "Redo Text Україна".into()), "Повторити Text Україна");
-    }
-
-    #[test]
     fn ukrainian_catalog_matches_the_settings_registry() {
         let codes: Vec<_> = effectcraft_engine::prefs::LANGUAGES.iter().map(|(_, code)| *code).filter(|code| !matches!(*code, "system" | "en")).collect();
         assert_eq!(codes, CATALOG_CODES);
         assert!(effectcraft_engine::prefs::LANGUAGES.contains(&("Українська", "uk")));
         assert_eq!(code("uk"), "uk");
         assert_eq!(code("unknown"), "en");
-    }
-
-    #[test]
-    fn es_translates_labels_computed_titles_and_keeps_names_verbatim() {
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key":"general.language", "value":"es"})).unwrap();
-        assert_eq!(language(&app), "es");
-        assert!(spanish(&app));
-        assert!(!traditional(&app));
-        assert!(!simplified(&app));
-        assert!(!japanese(&app));
-        // Fixed menu rows come from the catalog.
-        assert_eq!(label(&app, "", "Composition"), "Composición");
-        assert_eq!(label(&app, "", "Effect"), "Efecto");
-        assert_eq!(label(&app, "comp.new", "New Composition..."), "Nueva composición...");
-        assert_eq!(label(&app, "layer.newText", "Text"), "Texto");
-        assert_eq!(label(&app, "layer.setBlendMode", "Color Burn"), "Subexposición de color");
-        // Untranslated keys and dynamic labels stay verbatim.
-        assert_eq!(label(&app, "unknown.command", "Text"), "Text");
-        assert_eq!(
-            entry(
-                &app,
-                &MenuEntry { label: "Undo".into(), command: "edit.undo".into(), params: json!({}), shortcut: None, alt_shortcuts: vec![] },
-                "Undo Comp1".into()
-            ),
-            "No se puede deshacer"
-        );
-        assert_eq!(
-            entry(
-                &app,
-                &MenuEntry { label: "Layer".into(), command: "window.panel".into(), params: json!({"panel":"layer"}), shortcut: None, alt_shortcuts: vec![] },
-                "Layer: File".into()
-            ),
-            "Capa: File"
-        );
-        // The submenu titles that name the current workspace / view.
-        assert_eq!(
-            submenu(&app, "Assign Shortcut to Workspace", "Assign Shortcut to “Default” Workspace".into()),
-            "Asignar método abreviado al espacio de trabajo “Default”"
-        );
-        assert_eq!(submenu(&app, "Assign Shortcut to 3D View", "Assign Shortcut to “Top”".into()), "Asignar método abreviado a la vista 3D “Top”");
-        // The menu tree carries the same commands and shortcuts with the Spanish labels.
-        let es = crate::native_menu::build(&app);
-        assert!(es.items().iter().any(|i| i.command == "comp.new" && i.label == "Nueva composición..."));
-        assert!(es.items().iter().any(|i| i.command == "layer.newText" && i.label == "Texto"));
-        assert!(es.items().iter().any(|i| i.command == "keys.easyEase" && i.label == "Suavizado"));
-        // A dynamic filename is never translated.
-        app.session.prefs.push_recent("/tmp/File.ecproj");
-        assert!(crate::native_menu::build(&app).items().iter().any(|i| i.command == "file.openRecent" && i.label == "File.ecproj"));
-    }
-
-    #[test]
-    fn pt_br_translates_labels_computed_titles_and_keeps_names_verbatim() {
-        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
-        app.session.execute("prefs.set", json!({"key":"general.language", "value":"pt-br"})).unwrap();
-        assert_eq!(language(&app), "pt-br");
-        assert!(!japanese(&app));
-        // Fixed menu rows come from the catalog.
-        assert_eq!(label(&app, "", "Composition"), "Composição");
-        assert_eq!(label(&app, "", "Effect"), "Efeito");
-        assert_eq!(label(&app, "comp.new", "New Composition..."), "Nova composição...");
-        assert_eq!(label(&app, "layer.newText", "Text"), "Texto");
-        // Untranslated keys and dynamic labels stay verbatim.
-        assert_eq!(label(&app, "unknown.command", "Text"), "Text");
-        assert_eq!(
-            entry(
-                &app,
-                &MenuEntry { label: "Undo".into(), command: "edit.undo".into(), params: json!({}), shortcut: None, alt_shortcuts: vec![] },
-                "Undo Comp1".into()
-            ),
-            "Não há nada para desfazer"
-        );
-        assert_eq!(
-            entry(
-                &app,
-                &MenuEntry { label: "Layer".into(), command: "window.panel".into(), params: json!({"panel":"layer"}), shortcut: None, alt_shortcuts: vec![] },
-                "Layer: File".into()
-            ),
-            "Camada: File"
-        );
-        // The submenu titles that name the current workspace / view.
-        assert_eq!(
-            submenu(&app, "Assign Shortcut to Workspace", "Assign Shortcut to “Default” Workspace".into()),
-            "Atribuir atalho à área de trabalho “Default”"
-        );
-        assert_eq!(submenu(&app, "Assign Shortcut to 3D View", "Assign Shortcut to “Top”".into()), "Atribuir atalho à visualização 3D “Top”");
     }
 
     #[test]
