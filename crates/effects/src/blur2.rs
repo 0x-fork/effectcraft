@@ -516,7 +516,7 @@ fn camera_lens_blur(ctx: &EffectCtx, mut b: Buf) -> Buf {
 pub fn radial_fast_pad(c: (f64, f64), w: u32, h: u32, s: f64) -> u32 {
     let (w, h) = (f64::from(w), f64::from(h));
     let far = [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)].iter().map(|&(x, y)| (x - c.0).hypot(y - c.1)).fold(0.0, f64::max);
-    (far * s / (1.0 - s)).ceil().min(4096.0) as u32 + 1
+    ((far * s / (1.0 - s)).ceil() + 1.0).min(4096.0) as u32
 }
 
 fn radial_fast_blur(ctx: &EffectCtx, mut b: Buf) -> Buf {
