@@ -26,9 +26,7 @@ pub(crate) fn render<'g>(e: &mut Enc<'g>, r: &Renderer, comp_id: ItemId, t: Tick
         return None;
     }
     let ctx = r.eval_ctx(comp_id, t)?;
-    let s = r.opts.scale;
-    let w = ((ctx.comp.width as f64 * s).round() as u32).max(1);
-    let h = ((ctx.comp.height as f64 * s).round() as u32).max(1);
+    let (w, h) = effectcraft_render::frame_size(ctx.comp.width, ctx.comp.height, r.opts.scale);
     if r.depth() > 16 || !e.g.fits(w, h) {
         return None;
     }
