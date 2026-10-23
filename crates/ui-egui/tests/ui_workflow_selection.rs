@@ -651,9 +651,14 @@ fn layer_context_menus_offer_create_shapes_from_vector_layer_for_vector_footage(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20" viewBox="0 0 40 20"><rect width="40" height="20" fill="#ff0000"/></svg>"##,
     )
     .unwrap();
+    let png = dir.join("photo.png");
+    image::RgbaImage::from_pixel(16, 16, image::Rgba([0, 128, 255, 255])).save(&png).unwrap();
     let mut s = effectcraft_host::session();
     let item = s.execute("file.import", json!({"paths": [svg.to_string_lossy()]})).unwrap()["items"][0].as_u64().unwrap();
+    let raster = s.execute("file.import", json!({"paths": [png.to_string_lossy()]})).unwrap()["items"][0].as_u64().unwrap();
     s.execute("comp.new", json!({"name":"Vec","width":320,"height":180,"duration":4})).unwrap();
+    // The raster layer sits below the SVG layer, so the viewer click below lands on the SVG.
+    let photo = s.execute("layer.addItem", json!({"item": raster})).unwrap()["layer"].as_u64().unwrap();
     let logo = s.execute("layer.addItem", json!({"item": item})).unwrap()["layer"].as_u64().unwrap();
     let plate = s.execute("layer.newSolid", json!({"name":"Plate","width":40,"height":40,"color":"#406080"})).unwrap()["layer"].as_u64().unwrap();
     s.execute("edit.deselectAll", json!({})).unwrap();
@@ -682,6 +687,14 @@ fn layer_context_menus_offer_create_shapes_from_vector_layer_for_vector_footage(
     assert!(h.query_by_label(label).is_none(), "no vector conversion for a solid");
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
+    // Nor does raster footage.
+    h.state_mut().session.execute("layer.select", json!({"layers": [photo]})).unwrap();
+    h.run_steps(3);
+    let at = row(&h, photo);
+    right_click(&mut h, at);
+    assert!(h.query_by_label(label).is_none(), "no vector conversion for raster footage");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
     // The Timeline row of the SVG layer offers it, and it converts the layer.
     h.state_mut().session.execute("layer.select", json!({"layers": [logo]})).unwrap();
     h.run_steps(3);
@@ -693,7 +706,8 @@ fn layer_context_menus_offer_create_shapes_from_vector_layer_for_vector_footage(
     // The Composition viewer's menu offers it for the SVG layer under the pointer too.
     h.state_mut().session.execute("edit.undo", json!({})).unwrap();
     h.state_mut().session.execute("prop.set", json!({"layer": plate, "path": "transform/position", "value": [40.0, 40.0]})).unwrap();
-    h.state_mut().session.execute("layer.select", json!({"layers": [logo]})).unwrap();
+    // The solid stays selected: the menu must follow the layer under the pointer, not the selection.
+    h.state_mut().session.execute("layer.select", json!({"layers": [plate]})).unwrap();
     h.run_steps(3);
     let comp = rect(&h, "viewer.comp");
     right_click(&mut h, comp.center());
