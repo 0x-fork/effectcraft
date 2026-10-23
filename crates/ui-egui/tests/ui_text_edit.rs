@@ -635,6 +635,28 @@ fn rebound_deselect_all_chord_forwards_from_inside_the_edit() {
 }
 
 #[test]
+fn deselect_all_rebound_onto_an_alt_variant_of_an_editor_chord_forwards() {
+    let alt_cmd = |k| (k, Modifiers { alt: true, ..Modifiers::COMMAND });
+    for (bound, (k, mods)) in [("Cmd+Alt+Z", alt_cmd(Key::Z)), ("Cmd+Alt+A", alt_cmd(Key::A))] {
+        let mut a = app();
+        a.session.execute("shortcuts.set", json!({"command": "edit.deselectAll", "keys": [bound]})).unwrap();
+        let (mut h, lid) = type_tool_edit(a, "Hello");
+        // The editor owns Cmd+A and Cmd+Z themselves, whatever Deselect All is bound to…
+        key(&mut h, Key::A, Modifiers::COMMAND);
+        let (_, _, a0, c0) = edited(&h);
+        assert_eq!((a0, c0), (0, 5), "{bound}: Cmd+A still selects every character");
+        type_text(&mut h, "Hi");
+        key(&mut h, Key::Z, Modifiers::COMMAND);
+        assert_eq!(edited(&h).1, "Hello", "{bound}: Cmd+Z still undoes the typing");
+        // …but not their Alt variants, which belong to the rebound Deselect All.
+        key(&mut h, k, mods);
+        assert!(h.state().session.state.text_edit.is_none(), "{bound}: the rebound chord ends the edit");
+        assert!(h.state().session.state.selected_layers.is_empty(), "{bound}: and deselects");
+        assert_eq!(layer_doc(&h.state().session, LayerId(lid)).unwrap().text, "Hello", "{bound}: without undoing or selecting text");
+    }
+}
+
+#[test]
 fn bare_letter_rebinding_stays_typing_but_a_function_key_rebinding_forwards() {
     let mut a = app();
     a.session.execute("shortcuts.set", json!({"command": "edit.deselectAll", "keys": ["A"]})).unwrap();

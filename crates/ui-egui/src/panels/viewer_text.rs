@@ -486,12 +486,14 @@ fn keyboard(app: &mut EffectcraftApp, ui: &mut egui::Ui, viewer: Rect) {
                     Key::Escape => {
                         exec(app, "text.endEdit", json!({}));
                     }
-                    // Cmd/Ctrl alone is Select All; with Shift it belongs to Deselect All,
-                    // which the binding match below handles, so don't eat the chord here.
-                    Key::A if cmd && !m.shift => {
+                    // The editor owns exactly Cmd/Ctrl+A (Select All) and Cmd/Ctrl+Z with or
+                    // without Shift (Undo, Redo). Other modifiers on those keys aren't editing
+                    // chords, so they fall through to the binding match below: Shift+A is
+                    // Deselect All's default, and Alt variants are free for a rebound one.
+                    Key::A if cmd && !m.shift && !m.alt => {
                         exec(app, "text.setSelection", json!({"select": "all"}));
                     }
-                    Key::Z if cmd => {
+                    Key::Z if cmd && !m.alt => {
                         let _ = crate::menus::invoke(app, &ctx, if m.shift { "edit.redo" } else { "edit.undo" }, json!({}));
                     }
                     Key::Comma | Key::Period if cmd && m.shift => {
