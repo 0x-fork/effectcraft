@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const cli = path.resolve(process.argv[2] ?? '');
+// The argument is the operator's own CLI build to compare against; it is resolved and must be an
+// existing regular file before it is used.
+const cli = path.resolve(process.argv[2] ?? ''); // NOSONAR
 if (!process.argv[2] || !fs.statSync(cli, { throwIfNoEntry: false })?.isFile()) {
   throw new Error('Usage: node examples/check-ae-ease.mjs <aesync/server/dist/cli.js>');
 }
