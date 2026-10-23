@@ -561,7 +561,7 @@ fn soft_linear_noise(x: f32, y: f32, z: f32, seed: u32) -> f32 {
     let wy = bspline(y + 0.5 - y0);
     let a = soft_linear_slice(i32(x0), i32(y0), i32(z0), wx, wy, seed);
     let b = soft_linear_slice(i32(x0), i32(y0), i32(z0) + 1, wx, wy, seed);
-    let n = a + (b - a) * fade(z - z0);
+    let n = a + (b - a) * (z - z0);
     return 0.5 + (n - 0.5) * SOFT_LINEAR_GAIN;
 }
 
