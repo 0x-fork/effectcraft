@@ -8,7 +8,7 @@
 
 use effectcraft_engine::color::BlendMode;
 use effectcraft_engine::keyframe::{Interp, Value};
-use effectcraft_engine::project::{Comp, GroupKind, ItemId, Layer, LayerId, LayerSource, MatteKind, Node, ParamUi, PropGroup, Property};
+use effectcraft_engine::project::{Comp, GroupKind, ItemId, Layer, LayerId, LayerSource, MatteKind, Node, ParamUi, Project, PropGroup, Property};
 use effectcraft_engine::render::EvalCtx;
 use effectcraft_engine::time::Tick;
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
@@ -1314,6 +1314,39 @@ fn switch_gesture(ui: &egui::Ui, resp: &egui::Response, row: Rect, switch: &'sta
     (a.min(b) < row.max.y && a.max(b) >= row.min.y).then_some((d.value, d.merge))
 }
 
+/// The layers an edit made on `layer`'s row applies to (a switch, its label, its blending mode):
+/// the selection when the row is selected, else that layer alone, as in After Effects.
+fn edited_layers(layer: LayerId, selected: &[LayerId]) -> Vec<u64> {
+    if selected.contains(&layer) { selected.iter().map(|l| l.0).collect() } else { vec![layer.0] }
+}
+
+/// Whether the Timeline shows switch `name`'s cell on `layer`'s row (A/V Features and Switches
+/// columns): a layer that has no such cell isn't one a click gives the switch to either.
+fn switch_applies(layer: &Layer, name: &str, project: &Project) -> bool {
+    match name {
+        "video" | "lock" | "shy" => true,
+        "audio" => layer.props.sub("audio").is_some(),
+        "solo" | "quality" | "motionBlur" | "adjustment" => layer.source.is_av(),
+        "collapse" => collapse_applies(layer, project),
+        "fx" => layer.effects().is_some_and(|f| !f.children.is_empty()),
+        "frameBlend" => matches!(layer.source, LayerSource::Footage { .. } | LayerSource::Comp { .. }),
+        "threeD" => layer.source.is_av() || matches!(layer.source, LayerSource::Null),
+        _ => true,
+    }
+}
+
+/// The layers a click on the `name` switch of `layer`'s row acts on: [`edited_layers`] without
+/// the layers the switch doesn't apply to.
+fn switch_targets(comp: &Comp, project: &Project, selected: &[LayerId], layer: u64, name: &str) -> Vec<u64> {
+    edited_layers(LayerId(layer), selected).into_iter().filter(|l| comp.layer(LayerId(*l)).is_some_and(|l| switch_applies(l, name, project))).collect()
+}
+
+/// The layers a Modes column edit on `layer`'s row (its blending mode, Preserve Transparency)
+/// acts on: [`edited_layers`] that have video.
+fn mode_targets(comp: &Comp, layer: LayerId, selected: &[LayerId]) -> Vec<u64> {
+    edited_layers(layer, selected).into_iter().filter(|l| comp.layer(LayerId(*l)).is_some_and(|l| l.source.is_av())).collect()
+}
+
 /// A layer's switch (A/V Features and Switches columns) in `row`, with the
 /// [`switch_gesture`].
 #[allow(clippy::too_many_arguments)]
@@ -1328,20 +1361,29 @@ fn layer_switch(
     layer: u64,
     name: &'static str,
     others: bool,
+    comp: &Comp,
+    project: &Project,
+    selected: &[LayerId],
     actions: &mut Vec<(String, serde_json::Value)>,
 ) {
     let resp = widgets::icon_toggle(ui, br, icon, on, t, id, Sense::click_and_drag());
     // Alt-click on an A/V feature sets the layer apart: the other layers go off (or locked),
-    // and come back on the next Alt-click.
+    // and come back on the next Alt-click. With several layers selected, the whole selection is
+    // set apart.
     if others && resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed() && i.modifiers.alt) {
-        actions.push(("layer.setSwitch".into(), json!({"layers": [layer], "switch": name, "others": true})));
+        let layers = edited_layers(LayerId(layer), selected);
+        actions.push(("layer.setSwitch".into(), json!({"layers": layers, "switch": name, "others": true})));
         return;
     }
+    // A press on a selected layer's switch gives the switch to every selected layer, as in After
+    // Effects; the targets are picked when the press happens, never while the row is drawn.
     if let Some((value, merge)) = switch_gesture(ui, &resp, row, name, on) {
-        actions.push(("layer.setSwitch".into(), json!({"layers": [layer], "switch": name, "value": value, "merge": merge})));
+        let layers = switch_targets(comp, project, selected, layer, name);
+        actions.push(("layer.setSwitch".into(), json!({"layers": layers, "switch": name, "value": value, "merge": merge})));
     } else if resp.clicked() && !resp.clicked_by(egui::PointerButton::Primary) {
         // Keyboard or accessibility activation (a pointer press was handled above).
-        actions.push(("layer.setSwitch".into(), json!({"layers": [layer], "switch": name})));
+        let layers = switch_targets(comp, project, selected, layer, name);
+        actions.push(("layer.setSwitch".into(), json!({"layers": layers, "switch": name, "value": !on})));
     }
 }
 
@@ -2000,10 +2042,10 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
                 // as in After Effects: it hides a null's outline in the viewer and turns a camera or
                 // light off.
                 let av_items: [(Icon, bool, &str, bool); 4] = [
-                    (Icon::Eye, sw.video, "video", true),
-                    (Icon::Speaker, sw.audio, "audio", layer.props.sub("audio").is_some()),
-                    (Icon::Solo, sw.solo, "solo", layer.source.is_av()),
-                    (Icon::Lock, sw.locked, "lock", true),
+                    (Icon::Eye, sw.video, "video", switch_applies(layer, "video", &app.session.project)),
+                    (Icon::Speaker, sw.audio, "audio", switch_applies(layer, "audio", &app.session.project)),
+                    (Icon::Solo, sw.solo, "solo", switch_applies(layer, "solo", &app.session.project)),
+                    (Icon::Lock, sw.locked, "lock", switch_applies(layer, "lock", &app.session.project)),
                 ];
                 for (i, (icon, on, name, applicable)) in av_items.into_iter().enumerate() {
                     let br = Rect::from_center_size(pos2(cw.av + 10.0 + 18.0 * i as f32, cy), vec2(15.0, 15.0));
@@ -2011,7 +2053,22 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
                         continue;
                     }
                     lp.rect_filled(br.shrink(0.5), 1.0, t.switch_well);
-                    layer_switch(ui, &t, r, br, icon, on, egui::Id::new(("av", layer.id.0, i)), layer.id.0, name, true, &mut actions);
+                    layer_switch(
+                        ui,
+                        &t,
+                        r,
+                        br,
+                        icon,
+                        on,
+                        egui::Id::new(("av", layer.id.0, i)),
+                        layer.id.0,
+                        name,
+                        true,
+                        &comp,
+                        &app.session.project,
+                        &selected,
+                        &mut actions,
+                    );
                     app.auto.add(&format!("timeline.layer.{}.{name}", layer.id.0), br, name);
                 }
                 // Label swatch.
@@ -2026,7 +2083,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
                         widgets::open_popup(ui, pop);
                     }
                     if let Some(lab) = widgets::label_popup(ui, pop, lr.left_bottom(), layer.label, |l| app.session.prefs.label_name(l), &t) {
-                        actions.push(("edit.label".into(), json!({"layers": [layer.id.0], "label": lab.name()})));
+                        actions.push(("edit.label".into(), json!({"layers": edited_layers(layer.id, &selected), "label": lab.name()})));
                     }
                 }
                 if vis.num {
@@ -2122,19 +2179,24 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
                 layer_context_menu(&row_resp, &comp, layer, &selected, LayerMenuCaps::of(&app.session.project, layer), &mut app.auto, &mut actions);
                 // Switches.
                 let sws: [(Icon, bool, &str, bool); 8] = [
-                    (Icon::Shy, sw.shy, "shy", true),
-                    (Icon::Collapse, sw.collapse, "collapse", collapse_applies(layer, &app.session.project)),
-                    (Icon::Quality, sw.quality == effectcraft_engine::project::Quality::Best, "quality", layer.source.is_av()),
-                    (Icon::Fx, sw.effects, "fx", layer.effects().is_some_and(|f| !f.children.is_empty())),
+                    (Icon::Shy, sw.shy, "shy", switch_applies(layer, "shy", &app.session.project)),
+                    (Icon::Collapse, sw.collapse, "collapse", switch_applies(layer, "collapse", &app.session.project)),
+                    (
+                        Icon::Quality,
+                        sw.quality == effectcraft_engine::project::Quality::Best,
+                        "quality",
+                        switch_applies(layer, "quality", &app.session.project),
+                    ),
+                    (Icon::Fx, sw.effects, "fx", switch_applies(layer, "fx", &app.session.project)),
                     (
                         Icon::FrameBlend,
                         sw.frame_blend != effectcraft_engine::project::FrameBlend::Off,
                         "frameBlend",
-                        matches!(layer.source, LayerSource::Footage { .. } | LayerSource::Comp { .. }),
+                        switch_applies(layer, "frameBlend", &app.session.project),
                     ),
-                    (Icon::MotionBlur, sw.motion_blur, "motionBlur", layer.source.is_av()),
-                    (Icon::Adjustment, sw.adjustment, "adjustment", layer.source.is_av()),
-                    (Icon::Cube, layer.is_3d(), "threeD", layer.source.is_av() || matches!(layer.source, LayerSource::Null)),
+                    (Icon::MotionBlur, sw.motion_blur, "motionBlur", switch_applies(layer, "motionBlur", &app.session.project)),
+                    (Icon::Adjustment, sw.adjustment, "adjustment", switch_applies(layer, "adjustment", &app.session.project)),
+                    (Icon::Cube, layer.is_3d(), "threeD", switch_applies(layer, "threeD", &app.session.project)),
                 ];
                 for (i, (icon, on, name, applicable)) in sws.into_iter().enumerate() {
                     if !applicable || !vis.switches {
@@ -2142,7 +2204,22 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
                     }
                     let br = Rect::from_center_size(pos2(cw.switches + SW * i as f32 + SW / 2.0, cy), vec2(16.0, 16.0));
                     lp.rect_filled(br.shrink(1.0), 1.0, t.switch_well);
-                    layer_switch(ui, &t, r, br, icon, on, egui::Id::new(("sw", layer.id.0, i)), layer.id.0, name, false, &mut actions);
+                    layer_switch(
+                        ui,
+                        &t,
+                        r,
+                        br,
+                        icon,
+                        on,
+                        egui::Id::new(("sw", layer.id.0, i)),
+                        layer.id.0,
+                        name,
+                        false,
+                        &comp,
+                        &app.session.project,
+                        &selected,
+                        &mut actions,
+                    );
                     app.auto.add(&format!("timeline.layer.{}.switch.{name}", layer.id.0), br, name);
                 }
                 // Modes.
@@ -2159,11 +2236,21 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
                         .flat_map(|m| if m.ends_group() { vec![m.label().to_string(), "-".to_string()] } else { vec![m.label().to_string()] })
                         .collect();
                     if let Some(i) = widgets::popup_menu(ui, pop, mr.left_bottom(), &opts, opts.iter().position(|o| o == layer.blend_mode.label())) {
-                        actions.push(("layer.setBlendMode".into(), json!({"layers": [layer.id.0], "mode": opts[i]})));
+                        actions.push(("layer.setBlendMode".into(), json!({"layers": mode_targets(&comp, layer.id, &selected), "mode": opts[i]})));
                     }
                     let tr = Rect::from_center_size(pos2(cw.mode + 76.0 + 6.0, cy), vec2(14.0, 14.0));
+                    app.auto.add(&format!("timeline.layer.{}.preserveTransparency", layer.id.0), tr, "Preserve Transparency");
                     if widgets::checkbox(ui, tr, layer.preserve_transparency, &t, egui::Id::new(("pt", layer.id.0))).clicked() {
-                        actions.push(("layer.setSwitch".into(), json!({"layers": [layer.id.0], "switch": "preserveTransparency"})));
+                        // The click gives the selection the state the clicked row toggles to,
+                        // whatever the first selected layer's value (as the switches do).
+                        actions.push((
+                            "layer.setSwitch".into(),
+                            json!({
+                                "layers": mode_targets(&comp, layer.id, &selected),
+                                "switch": "preserveTransparency",
+                                "value": !layer.preserve_transparency
+                            }),
+                        ));
                     }
                     // Track matte: layer picker + kind.
                     let mr = Rect::from_min_size(pos2(cw.trkmat + 2.0, cy - 9.0), vec2(104.0, 18.0));

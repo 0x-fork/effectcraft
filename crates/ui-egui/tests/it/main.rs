@@ -7,6 +7,7 @@ mod ui_agent_audit;
 mod ui_angles;
 mod ui_audio_scrub;
 mod ui_azerty_shortcuts;
+mod ui_batch_switches;
 mod ui_blank_context_menus;
 mod ui_camera_tracker;
 mod ui_character_eyedropper;

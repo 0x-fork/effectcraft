@@ -417,8 +417,10 @@ fn set_switch_others(s: &mut Session, cid: ItemId, ids: &[LayerId], name: &str, 
         let applies = |l: &Layer| match name {
             "audio" => l.props.sub("audio").is_some(),
             "lock" | "locked" => true,
-            // Nulls have a Video switch too (it hides their outline in the viewer).
-            "video" | "eye" => (l.source.is_av() || matches!(l.source, LayerSource::Null)) && !mattes.contains(&l.id),
+            // Every layer has a Video switch (it hides a null's outline in the viewer and turns a
+            // camera or light off), as the Timeline's eye cell shows; track mattes keep theirs off
+            // by design.
+            "video" | "eye" => !mattes.contains(&l.id),
             _ => l.source.is_av() && !mattes.contains(&l.id),
         };
         let mut alone = true;

@@ -111,6 +111,29 @@ fn set_switch_others() {
     assert!(s.execute("layer.setSwitch", json!({"layers": [c], "switch": "nope", "others": true})).is_err());
 }
 
+/// The Video switch has a cell on every layer's row, cameras and lights included, so Alt-clicking
+/// it (and Hide Other Video) takes them along with the rest.
+#[test]
+fn video_others_takes_cameras_and_lights() {
+    let mut s = comp();
+    let a = solid(&mut s, "#ff0000");
+    let cam = s.execute("layer.newCamera", json!({})).unwrap()["layer"].as_u64().unwrap();
+    let light = s.execute("layer.newLight", json!({"kind": "Point"})).unwrap()["layer"].as_u64().unwrap();
+    let get = |s: &Session, f: fn(&effectcraft_project::Layer) -> bool| [a, cam, light].map(|l| f(&layer(s, l)));
+    // The camera and the light are hidden: Alt-click on the solid's eye brings them back, since
+    // they stand apart with it, and the next Alt-click hides them with every other layer.
+    s.execute("layer.setSwitch", json!({"layers": [cam, light], "switch": "video", "value": false})).unwrap();
+    s.execute("layer.setSwitch", json!({"layers": [a], "switch": "video", "others": true})).unwrap();
+    assert_eq!(get(&s, |l| l.switches.video), [true; 3]);
+    s.execute("layer.setSwitch", json!({"layers": [a], "switch": "video", "others": true})).unwrap();
+    assert_eq!(get(&s, |l| l.switches.video), [true, false, false]);
+    // Hide Other Video takes them too.
+    s.execute("layer.showAllVideo", json!({})).unwrap();
+    assert_eq!(get(&s, |l| l.switches.video), [true; 3]);
+    s.execute("layer.hideOtherVideo", json!({"layers": [a]})).unwrap();
+    assert_eq!(get(&s, |l| l.switches.video), [true, false, false]);
+}
+
 /// A null's Video switch (the eye) works like any layer's, as in After Effects: it toggles,
 /// Alt-click and Hide Other Video take nulls along, and its children still follow it while it is
 /// hidden (parenting ignores the eye).
