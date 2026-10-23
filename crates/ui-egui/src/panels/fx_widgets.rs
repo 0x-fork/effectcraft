@@ -329,7 +329,16 @@ pub struct CurveEdit {
 /// moves one, dragging a point off the graph (or Alt-clicking it) removes it. In pencil mode a
 /// drag draws the curve freehand. `natural` draws the natural spline the Curves effect renders
 /// (`Curve::parse_natural`) instead of the monotone one.
-pub fn curves_graph(ui: &mut egui::Ui, rect: Rect, pts: &CurvePoints, channel: usize, pencil: bool, natural: bool, id: egui::Id, t: &Tokens) -> (egui::Response, CurveEdit) {
+pub fn curves_graph(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    pts: &CurvePoints,
+    channel: usize,
+    pencil: bool,
+    natural: bool,
+    id: egui::Id,
+    t: &Tokens,
+) -> (egui::Response, CurveEdit) {
     let resp = ui.interact(rect.expand(6.0), id, Sense::click_and_drag());
     let p = ui.painter().with_clip_rect(rect.expand(8.0));
     p.rect_filled(rect, 0.0, Color32::from_rgb(0x1c, 0x1c, 0x1c));
@@ -351,7 +360,8 @@ pub fn curves_graph(ui: &mut egui::Ui, rect: Rect, pts: &CurvePoints, channel: u
     };
     let to_s = |x: f32, y: f32| pos2(rect.min.x + x * rect.width(), rect.max.y - y * rect.height());
     let to_g = |s: Pos2| [((s.x - rect.min.x) / rect.width()), ((rect.max.y - s.y) / rect.height())];
-    let spline = if natural { effectcraft_engine::effects::Curve::parse_natural(&pts.format()) } else { effectcraft_engine::effects::Curve::parse(&pts.format()) };
+    let spline =
+        if natural { effectcraft_engine::effects::Curve::parse_natural(&pts.format()) } else { effectcraft_engine::effects::Curve::parse(&pts.format()) };
     let seed = || {
         (0..=64)
             .map(|i| {
