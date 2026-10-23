@@ -924,23 +924,27 @@ fn family_faces_cache() -> &'static RwLock<std::collections::HashMap<(FallbackSc
 /// loaded are tried after that (cheap), and any installed face that covers the character is tried
 /// last. `prefer` is returned when nothing covers it (the glyph renders as the missing-glyph box).
 pub fn fallback_for(c: char, prefer: FaceId) -> FaceId {
-    fallback_with_locale(c, prefer, CjkLocale::from_tag(&active_cjk_locale()))
+    fallback_with_locale(c, prefer, || CjkLocale::from_tag(&active_cjk_locale()))
 }
 
 /// Choose a fallback for an explicit interface language, independent of concurrent global
 /// language changes. Empty, `c` and `posix` use the OS environment rather than the global request.
 pub fn fallback_for_locale(c: char, prefer: FaceId, tag: &str) -> FaceId {
     let tag = tag.trim();
-    let locale = if tag.is_empty() || tag.eq_ignore_ascii_case("c") || tag.eq_ignore_ascii_case("posix") {
-        CjkLocale::from_tag(&environment_cjk_locale())
-    } else {
-        CjkLocale::from_tag(tag)
+    let locale = || {
+        if tag.is_empty() || tag.eq_ignore_ascii_case("c") || tag.eq_ignore_ascii_case("posix") {
+            CjkLocale::from_tag(&environment_cjk_locale())
+        } else {
+            CjkLocale::from_tag(tag)
+        }
     };
     fallback_with_locale(c, prefer, locale)
 }
 
-/// Keep a single language snapshot through the family-order lookup and cache insertion.
-fn fallback_with_locale(c: char, prefer: FaceId, locale: CjkLocale) -> FaceId {
+/// Keep a single language snapshot through the family-order lookup and cache insertion. `locale`
+/// is read only for a script with usual families: reading it takes a lock and may consult the
+/// environment, and layout asks for a fallback for every character.
+fn fallback_with_locale(c: char, prefer: FaceId, locale: impl FnOnce() -> CjkLocale) -> FaceId {
     let p = face(prefer);
     if p.has_char(c) || c.is_control() {
         return prefer;
@@ -961,7 +965,7 @@ fn fallback_with_locale(c: char, prefer: FaceId, locale: CjkLocale) -> FaceId {
         if cfg!(not(target_arch = "wasm32")) && !system_scanned() {
             scan_system();
         }
-        if let Some(&id) = family_faces(script, &p, locale).iter().find(|&&id| face(id).has_char(c)) {
+        if let Some(&id) = family_faces(script, &p, locale()).iter().find(|&&id| face(id).has_char(c)) {
             return id;
         }
     }
