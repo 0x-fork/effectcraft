@@ -370,6 +370,7 @@ const SCRIPT_PROBES: &[(char, &str)] = &[
     ('ಕ', "kannada-system"),
     ('ക', "malayalam-system"),
     ('ก', "thai-system"),
+    ('ა', "georgian-system"),
 ];
 
 /// Register the system fallbacks for scripts the bundled fonts lack in every font family, and
@@ -659,6 +660,17 @@ mod script_font_tests {
         for &(_, name) in SCRIPT_PROBES.iter() {
             assert!(interface_fallback_candidates(name, "en").is_empty(), "{name} asked for a UI face");
         }
+    }
+
+    /// The Georgian interface draws its Mkhedruli text with an installed Georgian face (Sylfaen,
+    /// SF Georgian, Noto Sans Georgian…): Inter has no Georgian, so the labels showed as boxes.
+    #[test]
+    fn installed_georgian_fallback_draws_the_georgian_interface() {
+        if !installed('ა') {
+            eprintln!("no Georgian system font installed; skipping glyph coverage");
+            return;
+        }
+        assert_drawn("ka", "კომპოზიციაფენასაკვანძოკადრიეფექტიპარამეტრები");
     }
 
     /// #1141: switching the interface to Simplified Chinese drew most labels as boxes. A Japanese face
