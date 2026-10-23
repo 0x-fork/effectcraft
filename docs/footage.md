@@ -120,6 +120,15 @@ vectors, positions and IDs are never the picture. EXtractoR reads every other la
 Importing a layered file as a composition refreshes the decoded sources used by its layers,
 including files overwritten at the same path and byte size.
 
+- **Replace a layer's source** without rebuilding the layer: Alt-drag (Option-drag on macOS) a
+  footage item, composition or solid from the Project panel onto a layer in the Timeline. The
+  layer keeps its name, timing, transforms, keyframes, expressions, effects, masks, switches,
+  parenting and track matte; only its source changes. A source with audio adds Audio properties
+  when the layer has none. To replace several selected layers with the selected Project item, press
+  Ctrl+Alt+/ (Cmd+Opt+/). Compositions, footage and solids are interchangeable; folders, data files
+  and 3D models are not sources, and a composition can't be nested in itself. Alt-dragging onto a
+  layer is one layer at a time, as in After Effects.
+  Agents: `layer.replaceSource {"item": id, "layers": [ids]}`.
 - **File ▸ Replace Footage ▸ File…** (Ctrl+H) points the item at another file. Pick a numbered
   file to replace it with that file's whole sequence (`file.replaceFootage {"path": …,
   "sequence": false}` for one frame).
