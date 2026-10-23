@@ -7435,7 +7435,9 @@ mod tests {
     /// whose effect names come from the effect catalog instead.
     fn missing_menu_entries(code: &str) -> Vec<String> {
         let catalog = menu_catalog(code).unwrap_or_default();
+        // A label the tree repeats (one command in two menus) counts once.
         let mut missing = Vec::new();
+        let mut seen = BTreeSet::new();
         for line in TREE.lines() {
             let line = line.trim().trim_start_matches("[mac] ").trim_start_matches("[!mac] ");
             if line.is_empty() || line == "---" || line.starts_with('@') {
@@ -7444,7 +7446,7 @@ mod tests {
             let mut parts = line.split(" | ");
             let Some(en) = parts.next() else { continue };
             let command = parts.next().and_then(|p| p.split_whitespace().next()).unwrap_or("");
-            if !catalog.iter().any(|(id, source, _)| *id == command && *source == en) {
+            if !catalog.iter().any(|(id, source, _)| *id == command && *source == en) && seen.insert((command, en)) {
                 missing.push(en.to_string());
             }
         }
@@ -7459,11 +7461,7 @@ mod tests {
         println!("Missing translations (shown in English):");
         let mut total = 0;
         for code in CATALOG_CODES {
-            let catalogs = [
-                ("menus", missing_menu_entries(code)),
-                ("panels", ui::missing(code).into_iter().map(str::to_string).collect()),
-                ("effects", effects::missing(code)),
-            ];
+            let catalogs = [("menus", missing_menu_entries(code)), ("panels", ui::missing(code)), ("effects", effects::missing(code))];
             let count: usize = catalogs.iter().map(|(_, missing)| missing.len()).sum();
             total += count;
             println!("{code}: {count}");

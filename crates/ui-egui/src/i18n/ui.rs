@@ -80,13 +80,53 @@ fn catalog(language: &str) -> Option<&'static Index> {
     Some(index.get_or_init(|| rows.iter().copied().collect()))
 }
 
-/// The panel strings `language` has no row for (every English source any catalog lists), in
-/// catalog order, for the missing-strings report.
+/// The panel strings `language` has no row for, for the missing-strings report: every English
+/// source any catalog lists, in catalog order, then the literals the converted panels pass to `tr`
+/// or `tr_args` that no catalog lists yet.
 #[cfg(test)]
-pub(super) fn missing(language: &str) -> Vec<&'static str> {
+pub(super) fn missing(language: &str) -> Vec<String> {
     let table = catalog(language);
+    let rows = ROWS.iter().flat_map(|(_, rows)| rows.iter().map(|(en, _)| en.to_string()));
+    let literals = tests::CONVERTED.iter().flat_map(|(_, src)| tr_literals(src));
     let mut seen = std::collections::HashSet::new();
-    ROWS.iter().flat_map(|(_, rows)| rows.iter().map(|(en, _)| *en)).filter(|en| seen.insert(*en) && !table.is_some_and(|c| c.contains_key(en))).collect()
+    rows.chain(literals).filter(|en| !table.is_some_and(|c| c.contains_key(en.as_str())) && seen.insert(en.clone())).collect()
+}
+
+/// The string literals `src` passes to `tr(` and `tr_args(`.
+#[cfg(test)]
+fn tr_literals(src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for call in ["tr(\"", "tr_args(\""] {
+        for (at, _) in src.match_indices(call) {
+            // `str("` or `attr("` is another call.
+            if src[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                continue;
+            }
+            out.extend(string_literal(&src[at + call.len()..]));
+        }
+    }
+    out
+}
+
+/// The text of the string literal `rest` starts inside (just after its opening quote), with the
+/// common escapes resolved; `None` for an escape this doesn't resolve.
+#[cfg(test)]
+fn string_literal(rest: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut chars = rest.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return Some(out),
+            '\\' => match chars.next()? {
+                'n' => out.push('\n'),
+                't' => out.push('\t'),
+                c @ ('\\' | '"' | '\'') => out.push(c),
+                _ => return None,
+            },
+            c => out.push(c),
+        }
+    }
+    None
 }
 
 /// Characters required by the fixed panel catalog, for system-font coverage selection.
@@ -5388,9 +5428,10 @@ mod tests {
 
     /// The interface text that has moved into this catalog. Add a panel here when you convert it;
     /// `every_row_is_used_by_a_converted_panel` then looks for its rows' English sources in it.
-    const CONVERTED: &[(&str, &str)] = &[
+    pub(super) const CONVERTED: &[(&str, &str)] = &[
         ("color_picker.rs", include_str!("../color_picker.rs")),
         ("credits.rs", include_str!("../credits.rs")),
+        ("dock.rs", include_str!("../dock.rs")),
         ("dock_ui.rs", include_str!("../dock_ui.rs")),
         ("header.rs", include_str!("../header.rs")),
         ("menus.rs", include_str!("../menus.rs")),
