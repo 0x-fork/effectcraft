@@ -753,14 +753,48 @@ fn requested_cjk_locale() -> Option<String> {
 /// The CJK locale to use: [`set_cjk_locale`] when the host asked for one, otherwise the locale
 /// environment (`LANG`, `LC_ALL`, `LC_CTYPE`; `EFFECTCRAFT_CJK_LOCALE` overrides them).
 fn active_cjk_locale() -> String {
-    requested_cjk_locale().unwrap_or_else(|| {
-        ["EFFECTCRAFT_CJK_LOCALE", "LC_ALL", "LC_CTYPE", "LANG"]
-            .iter()
-            .filter_map(|k| std::env::var(k).ok())
-            .map(|v| v.trim().to_ascii_lowercase())
-            .find(|v| !v.is_empty() && v != "c" && v != "posix")
-            .unwrap_or_default()
-    })
+    requested_cjk_locale().unwrap_or_else(environment_cjk_locale)
+}
+
+/// Read the environment independently of another UI's process-wide language request.
+fn environment_cjk_locale() -> String {
+    ["EFFECTCRAFT_CJK_LOCALE", "LC_ALL", "LC_CTYPE", "LANG"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .find(|v| !v.is_empty() && v != "c" && v != "posix")
+        .unwrap_or_default()
+}
+
+/// The four distinct fallback policies, rather than unbounded user-supplied locale cache keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum CjkLocale {
+    Japanese,
+    Korean,
+    Simplified,
+    Traditional,
+}
+
+impl CjkLocale {
+    fn from_tag(tag: &str) -> Self {
+        let tag = tag.trim().to_ascii_lowercase();
+        if tag.starts_with("zh") {
+            if asks_traditional_chinese(&tag) { Self::Traditional } else { Self::Simplified }
+        } else if tag.starts_with("ko") {
+            Self::Korean
+        } else {
+            Self::Japanese
+        }
+    }
+
+    fn tag(self) -> &'static str {
+        match self {
+            Self::Japanese => "ja",
+            Self::Korean => "ko",
+            Self::Simplified => "zh-hans",
+            Self::Traditional => "zh-hant",
+        }
+    }
 }
 
 /// The CJK language to try first for Han ideographs. Japanese when nothing says otherwise: the
@@ -778,6 +812,7 @@ fn han_order_for(tag: &str) -> [FallbackScript; 3] {
 }
 
 /// The order for the locale in force ([`active_cjk_locale`]).
+#[cfg(test)]
 fn han_order() -> [FallbackScript; 3] {
     han_order_for(&active_cjk_locale())
 }
@@ -796,15 +831,10 @@ fn chinese_families_for(tag: &str) -> &'static [&'static str] {
     if asks_traditional_chinese(tag) { TRADITIONAL_CHINESE_FAMILIES } else { SIMPLIFIED_CHINESE_FAMILIES }
 }
 
-/// [`chinese_families_for`] for the locale in force ([`active_cjk_locale`]).
-fn chinese_families() -> &'static [&'static str] {
-    chinese_families_for(&active_cjk_locale())
-}
-
-fn families_for(s: FallbackScript) -> &'static [&'static str] {
+fn families_for(s: FallbackScript, locale: CjkLocale) -> &'static [&'static str] {
     match s {
         FallbackScript::Japanese => JAPANESE_FAMILIES,
-        FallbackScript::Han => chinese_families(),
+        FallbackScript::Han => chinese_families_for(locale.tag()),
         FallbackScript::Korean => KOREAN_FAMILIES,
         FallbackScript::Arabic => ARABIC_FAMILIES,
         FallbackScript::Hebrew => HEBREW_FAMILIES,
@@ -881,9 +911,10 @@ fn fallback_cache() -> &'static RwLock<std::collections::HashMap<(u32, FaceId), 
     CACHE.get_or_init(Default::default)
 }
 
-/// The results of [`family_faces`], per script and preferred face.
-fn family_faces_cache() -> &'static RwLock<std::collections::HashMap<(FallbackScript, FaceId), Arc<Vec<FaceId>>>> {
-    static CACHE: OnceLock<RwLock<std::collections::HashMap<(FallbackScript, FaceId), Arc<Vec<FaceId>>>>> = OnceLock::new();
+/// The results of [`family_faces`], per script, preferred face and captured language policy.
+/// A lookup that finishes after a language change cannot populate another language's entry.
+fn family_faces_cache() -> &'static RwLock<std::collections::HashMap<(FallbackScript, FaceId, CjkLocale), Arc<Vec<FaceId>>>> {
+    static CACHE: OnceLock<RwLock<std::collections::HashMap<(FallbackScript, FaceId, CjkLocale), Arc<Vec<FaceId>>>>> = OnceLock::new();
     CACHE.get_or_init(Default::default)
 }
 
@@ -893,6 +924,23 @@ fn family_faces_cache() -> &'static RwLock<std::collections::HashMap<(FallbackSc
 /// loaded are tried after that (cheap), and any installed face that covers the character is tried
 /// last. `prefer` is returned when nothing covers it (the glyph renders as the missing-glyph box).
 pub fn fallback_for(c: char, prefer: FaceId) -> FaceId {
+    fallback_with_locale(c, prefer, CjkLocale::from_tag(&active_cjk_locale()))
+}
+
+/// Choose a fallback for an explicit interface language, independent of concurrent global
+/// language changes. Empty, `c` and `posix` use the OS environment rather than the global request.
+pub fn fallback_for_locale(c: char, prefer: FaceId, tag: &str) -> FaceId {
+    let tag = tag.trim();
+    let locale = if tag.is_empty() || tag.eq_ignore_ascii_case("c") || tag.eq_ignore_ascii_case("posix") {
+        CjkLocale::from_tag(&environment_cjk_locale())
+    } else {
+        CjkLocale::from_tag(tag)
+    };
+    fallback_with_locale(c, prefer, locale)
+}
+
+/// Keep a single language snapshot through the family-order lookup and cache insertion.
+fn fallback_with_locale(c: char, prefer: FaceId, locale: CjkLocale) -> FaceId {
     let p = face(prefer);
     if p.has_char(c) || c.is_control() {
         return prefer;
@@ -913,7 +961,7 @@ pub fn fallback_for(c: char, prefer: FaceId) -> FaceId {
         if cfg!(not(target_arch = "wasm32")) && !system_scanned() {
             scan_system();
         }
-        if let Some(&id) = family_faces(script, &p).iter().find(|&&id| face(id).has_char(c)) {
+        if let Some(&id) = family_faces(script, &p, locale).iter().find(|&&id| face(id).has_char(c)) {
             return id;
         }
     }
@@ -942,23 +990,24 @@ pub fn fallback_for(c: char, prefer: FaceId) -> FaceId {
 /// The script-aware part of [`fallback_for`]: the installed faces of the platform's usual families
 /// for `script`, in the order they are tried, each in the style of `prefer`. For CJK, the other CJK
 /// languages' families follow in the locale's order.
-fn family_faces(script: FallbackScript, prefer: &Face) -> Arc<Vec<FaceId>> {
-    if let Some(faces) = family_faces_cache().read().unwrap_or_else(|e| e.into_inner()).get(&(script, prefer.id)) {
+fn family_faces(script: FallbackScript, prefer: &Face, locale: CjkLocale) -> Arc<Vec<FaceId>> {
+    if let Some(faces) = family_faces_cache().read().unwrap_or_else(|e| e.into_inner()).get(&(script, prefer.id, locale)) {
         return faces.clone();
     }
     let order: Vec<FallbackScript> = match script {
         FallbackScript::Other => vec![],
-        FallbackScript::Han => han_order().to_vec(),
+        FallbackScript::Han => han_order_for(locale.tag()).to_vec(),
         s if s.is_cjk() => {
             let mut v = vec![s];
-            v.extend(han_order().iter().copied().filter(|o| *o != s));
+            v.extend(han_order_for(locale.tag()).iter().copied().filter(|o| *o != s));
             v
         }
         s => vec![s],
     };
     let style = &prefer.info.style;
-    let faces: Arc<Vec<FaceId>> = Arc::new(order.into_iter().flat_map(families_for).filter_map(|fam| resolve_in(fam, style)).map(|r| r.face).collect());
-    family_faces_cache().write().unwrap_or_else(|e| e.into_inner()).insert((script, prefer.id), faces.clone());
+    let faces: Arc<Vec<FaceId>> =
+        Arc::new(order.into_iter().flat_map(|s| families_for(s, locale)).filter_map(|fam| resolve_in(fam, style)).map(|r| r.face).collect());
+    family_faces_cache().write().unwrap_or_else(|e| e.into_inner()).insert((script, prefer.id, locale), faces.clone());
     faces
 }
 
@@ -974,6 +1023,77 @@ fn system_fallback(c: char, style: &str) -> Option<FaceId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Concurrent language requests must neither choose another context's font nor reuse its
+    /// cached family order. Synthetic fonts in a child process keep this independent of the host
+    /// font installation and of other tests that exercise the process-global database/locale.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn cjk_requests_keep_their_language_and_cache_entries() {
+        const CHILD: &str = "EFFECTCRAFT_TEST_ISOLATED_CJK";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "fonts::tests::cjk_requests_keep_their_language_and_cache_entries", "--nocapture"])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            return;
+        }
+        let families = [("ja", "Yu Gothic"), ("zh-hans", "Microsoft YaHei"), ("zh-hant", "Microsoft JhengHei"), ("ko", "Malgun Gothic")];
+        let mut expected = Vec::new();
+        {
+            let mut d = db().write().unwrap();
+            d.scanned = true; // This test process uses only bundled and synthetic fonts.
+            for (language, family) in families {
+                let mut data = test_font(family);
+                let table = data[12..12 + 8 * 16].as_chunks::<16>().0.iter().find(|t| &t[..4] == b"cmap").unwrap();
+                let cmap = u32::from_be_bytes(table[8..12].try_into().unwrap()) as usize + 12;
+                // Map 页 to the fixture's triangle glyph instead of its private-use range.
+                // All four fonts cover the probe, so coverage cannot choose the right language.
+                for (offset, value) in [(16, '页' as u16), (24, '页' as u16), (30, 2u16.wrapping_sub('页' as u16))] {
+                    data[cmap + offset..cmap + offset + 2].copy_from_slice(&value.to_be_bytes());
+                }
+                let data = Arc::new(data);
+                let names = read_faces_bytes(&data).into_iter().next().unwrap();
+                let id = push(&mut d, info_from(names, FaceData::Shared(data), "test"));
+                expected.push((language, id));
+            }
+        }
+        let base = resolve("Inter", "Regular").face;
+        for &(_, id) in &expected {
+            assert!(face(id).has_char('页'));
+        }
+        // Force the original interleaving: Chinese starts, then Japanese replaces the global
+        // language before Chinese looks up its probe. The explicit request must still win.
+        set_cjk_locale("zh-hans");
+        set_cjk_locale("ja");
+        assert_eq!(fallback_for('页', base), expected[0].1);
+        assert_eq!(fallback_for_locale('页', base, "zh-hans"), expected[1].1);
+        // Do not clear the cache here: different policies must coexist in the same cache.
+        for _ in 0..3 {
+            for &(language, id) in &expected {
+                assert_eq!(fallback_for_locale('页', base, language), id, "{language}");
+            }
+        }
+        let barrier = Arc::new(std::sync::Barrier::new(expected.len()));
+        let threads: Vec<_> = expected
+            .into_iter()
+            .map(|(language, id)| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..128 {
+                        set_cjk_locale(if language == "ja" { "zh-hans" } else { "ja" });
+                        assert_eq!(fallback_for_locale('页', base, language), id, "{language}");
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+    }
 
     #[test]
     fn extra_font_dirs_come_from_a_path_list() {
@@ -1302,7 +1422,7 @@ mod tests {
         assert!(!TRADITIONAL_CHINESE_FAMILIES.iter().any(|f| f.contains(" SC") || f.contains("YaHei") || f.contains("WenQuanYi")));
         assert!(TRADITIONAL_CHINESE_FAMILIES.iter().any(|f| f.contains("Heiti TC") || f.contains("Hiragino Sans CNS")));
         // The arm the fallback itself walks: Han hands over the list the locale's script picked.
-        assert_eq!(families_for(FallbackScript::Han), chinese_families_for(&active_cjk_locale()));
+        assert_eq!(families_for(FallbackScript::Han, CjkLocale::from_tag(&active_cjk_locale())), chinese_families_for(&active_cjk_locale()));
         // Han text is the only thing these lists serve; the Japanese order does not change.
         assert_eq!(han_order_for("ja_JP.UTF-8")[0], FallbackScript::Japanese);
     }
