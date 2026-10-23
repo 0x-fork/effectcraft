@@ -3330,8 +3330,9 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     super::markers_ui::comp_markers(app, ui, &comp, tm, mstrip, mrows);
     super::markers_ui::marker_bin(app, ui, &comp, tm, bin, mstrip);
 
-    // Spacebar held: the Hand tool. Dragging the ruler or the time graph scrolls it in time when
-    // zoomed in (registered last, so it takes the drag from the bars, keys and markers there).
+    // Spacebar held: the Hand tool. Dragging pans the rows vertically as well as scrolling the
+    // time graph in time when zoomed in (registered last, so it takes the drag from the bars,
+    // keys and markers there).
     if super::space_hand(&ctx) {
         let area = Rect::from_min_max(pos2(graph_x0, ruler.min.y), pos2(rect.max.x, rows_rect.max.y));
         let hand = ui.interact(area, egui::Id::new("tl-hand"), Sense::drag());
@@ -3339,10 +3340,14 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         if hand.hovered() || hand.dragged() {
             ctx.set_cursor_icon(if hand.dragged() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
         }
-        if hand.dragged() && app.ui.timeline.pps.is_some() {
-            let start = app.ui.timeline.start;
-            let last = (comp.duration.seconds() - (tm.t(graph_x1) - tm.start)).max(start).max(0.0);
-            app.ui.timeline.start = (start - hand.drag_delta().x as f64 / pps).clamp(0.0, last);
+        if hand.dragged() {
+            let dy = ui.input(|i| i.pointer.delta().y);
+            app.ui.timeline.scroll_y = (app.ui.timeline.scroll_y - dy).clamp(0.0, max_scroll);
+            if app.ui.timeline.pps.is_some() {
+                let start = app.ui.timeline.start;
+                let last = (comp.duration.seconds() - (tm.t(graph_x1) - tm.start)).max(start).max(0.0);
+                app.ui.timeline.start = (start - hand.drag_delta().x as f64 / pps).clamp(0.0, last);
+            }
         }
     }
 
