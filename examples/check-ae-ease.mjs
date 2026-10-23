@@ -11,9 +11,9 @@ if (!process.argv[2] || !fs.statSync(cli, { throwIfNoEntry: false })?.isFile()) 
 }
 const tolerance = 1e-7;
 function run(command, args) {
-  // NOSONAR: a developer-run comparison script; spawnSync never uses a shell and every command
-  // is either a fixed binary (`cargo`, `process.execPath`) or the CLI script path validated above.
-  const result = spawnSync(command, args, { cwd: root, windowsHide: true, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  // A developer-run comparison script; spawnSync never uses a shell and every command is either
+  // a fixed binary (`cargo`, `process.execPath`) or the CLI script path validated above.
+  const result = spawnSync(command, args, { cwd: root, windowsHide: true, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }); // NOSONAR
   if (result.status !== 0) throw new Error(result.stderr || result.stdout || 'Process failed');
   return JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim());
 }
