@@ -184,6 +184,11 @@ fn install_hooks(app: &mut EffectcraftApp) {
 #[wasm_bindgen]
 pub async fn start(canvas_id: String) -> Result<(), JsValue> {
     eframe::WebLogger::init(log::LevelFilter::Info).ok();
+    // Match System follows `?lang=` in the address, then the browser's languages; a language
+    // chosen in Settings still wins.
+    let navigator = web_sys::window().map(|w| w.navigator());
+    let browser = navigator.iter().flat_map(|n| n.languages().iter().filter_map(|v| v.as_string()).collect::<Vec<_>>());
+    effectcraft_ui_egui::i18n::set_system_locales(query_value("lang").into_iter().chain(browser).collect());
     let doc = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
     let canvas: web_sys::HtmlCanvasElement = doc.get_element_by_id(&canvas_id).ok_or("no canvas")?.dyn_into()?;
     let empty = query_flag("empty");

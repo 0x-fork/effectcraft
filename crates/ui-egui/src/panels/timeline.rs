@@ -1866,7 +1866,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     // Column headers scroll with the outline and never spill into the time ruler.
     let hp = p.with_clip_rect(Rect::from_min_max(ch.min, pos2(graph_x0 - 1.0, ch.max.y)));
     let hic = |icon: Icon, x: f32| icons::paint(&hp, Rect::from_center_size(pos2(x, hy), vec2(12.0, 12.0)), icon, t.text_dim);
-    let htext = |x: f32, s: &str| hp.text(pos2(x, hy), Align2::LEFT_CENTER, s, Tokens::ui(11.0), t.text_dim);
+    let htext = |x: f32, s: &str| hp.text(pos2(x, hy), Align2::LEFT_CENTER, crate::i18n::tr(s), Tokens::ui(11.0), t.text_dim);
     if vis.av {
         hic(Icon::Eye, cw.av + 10.0);
         hic(Icon::Speaker, cw.av + 28.0);
@@ -1950,7 +1950,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
             for (id, label) in COLUMNS {
                 let label = if id == "name" { if app.ui.timeline.source_name { "Source Name" } else { "Layer Name" } } else { label };
                 let on = column_visible(&app.ui.timeline, id);
-                if ui.add_enabled(id != "name", egui::Button::new(label).selected(on)).clicked() {
+                if ui.add_enabled(id != "name", egui::Button::new(crate::i18n::tr(label)).selected(on)).clicked() {
                     actions.push(("timeline.column".into(), json!({"column": id, "visible": !on})));
                     ui.close();
                 }

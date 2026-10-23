@@ -68,16 +68,35 @@ pub(crate) fn czech(app: &EffectcraftApp) -> bool {
 
 /// Settings ▸ General ▸ Language ▸ Match System: the operating system's interface language
 /// where EffectCraft has it, else English (#229), as After Effects installs in the system's
-/// language. The browser build stays in English because it has no system-locale probe.
+/// language. The browser build follows the locales its page passes in ([`set_system_locales`]).
 fn system_language() -> &'static str {
     #[cfg(not(target_arch = "wasm32"))]
     {
         static LANGUAGE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
         LANGUAGE.get_or_init(|| supported(sys_locale::get_locale().as_deref()))
     }
-    // No system locale in the browser build: English.
     #[cfg(target_arch = "wasm32")]
-    supported(None)
+    first_supported(SYSTEM_LOCALES.get().map(Vec::as_slice).unwrap_or_default())
+}
+
+/// The browser's preferred languages, most preferred first (`?lang=` in the address, then
+/// `navigator.languages`), for Match System in the web build.
+static SYSTEM_LOCALES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// Tell Match System the system's preferred languages (the web build has no locale probe of its
+/// own). Set before the first frame; only the first call counts.
+pub fn set_system_locales(tags: Vec<String>) {
+    let _ = SYSTEM_LOCALES.set(tags);
+}
+
+/// The first of `tags` EffectCraft has a catalog for (English counts), else English: someone who
+/// prefers Dutch, then Czech, gets Czech.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn first_supported(tags: &[String]) -> &'static str {
+    tags.iter()
+        .map(|t| (t, supported(Some(t))))
+        .find(|(t, code)| *code != "en" || t.split(['-', '_']).next().is_some_and(|p| p.eq_ignore_ascii_case("en")))
+        .map_or("en", |(_, code)| code)
 }
 
 /// The language EffectCraft shows for a BCP 47 locale (`ja-JP` → `ja`, `zh-Hans-CN` → `zh-hans`,
@@ -145,6 +164,23 @@ fn menu_catalog(language: &str) -> Option<&'static [(&'static str, &'static str,
         "cs" => CZECH,
         _ => return None,
     })
+}
+
+/// A command's label drawn outside the menu bar (the dock's tab titles, the workspace bar), in the
+/// language the panels draw in: the menu bar's row for (`command`, `source`), else the panel
+/// catalog's row for `source`, else `source`. `…` also finds a menu bar row written `...`.
+pub(crate) fn command_label<'a>(command: &str, source: &'a str) -> &'a str {
+    let dotted = source.strip_suffix('…').map(|stem| format!("{stem}..."));
+    let row = |key: &str| menu_catalog(ui::current())?.iter().find(|(id, en, _)| *id == command && *en == key).map(|(_, _, translated)| *translated);
+    row(source).or_else(|| row(dotted.as_deref()?)).unwrap_or_else(|| tr(source))
+}
+
+/// A Settings page's title as the menu bar's Settings submenu draws it, without the ellipsis; the
+/// panel catalog's row for pages that have no menu row. The panel catalog's "Type" is the kind
+/// (Camera Settings, the Project panel's column), while the Type page is about text.
+pub(crate) fn settings_page_title(title: &str) -> &str {
+    let menu = menu_catalog(ui::current()).and_then(|c| c.iter().find(|(id, en, _)| *id == "app.settings" && en.strip_suffix("...") == Some(title)));
+    menu.and_then(|(_, _, translated)| translated.strip_suffix("...")).unwrap_or_else(|| tr(title))
 }
 
 /// `source` looked up in `catalog` by (command, English label); the source itself when the pair is
@@ -6650,6 +6686,41 @@ mod tests {
     use effectcraft_engine::menus::{MenuNode, TREE, parse};
     use serde_json::json;
     use std::collections::BTreeSet;
+
+    /// Labels drawn outside the menu bar take the menu bar's row for their command (with `…` for
+    /// `...`), else the panel catalog's row, else stay as they are.
+    #[test]
+    fn command_label_reads_the_menu_row_then_the_panel_row() {
+        set_current("zh-hans");
+        assert_eq!(command_label("window.panel", "Project"), lookup(SIMPLIFIED_CHINESE, "window.panel", "Project"));
+        let (command, en, translated) = SIMPLIFIED_CHINESE.iter().find(|(c, en, _)| !c.is_empty() && en.ends_with("...")).expect("a menu row ending in ...");
+        assert_eq!(command_label(command, &format!("{}…", en.trim_end_matches("..."))), *translated);
+        assert_eq!(command_label("no.such.command", "Cancel"), tr("Cancel"));
+        assert_eq!(command_label("window.panel", "Comp 1"), "Comp 1");
+        set_current("en");
+        assert_eq!(command_label("window.panel", "Project"), "Project");
+    }
+
+    #[test]
+    fn settings_page_titles_read_the_menu_row() {
+        set_current("zh-hans");
+        let menu_row = lookup(SIMPLIFIED_CHINESE, "app.settings", "Type...");
+        assert_eq!(settings_page_title("Type"), menu_row.trim_end_matches("..."));
+        assert_ne!(settings_page_title("Type"), tr("Type"), "the page is about text, the panel row is the kind");
+        assert_eq!(settings_page_title("Roto Brush"), tr("Roto Brush"));
+        set_current("en");
+        assert_eq!(settings_page_title("Type"), "Type");
+    }
+
+    #[test]
+    fn match_system_takes_the_first_browser_language_with_a_catalog() {
+        let tags = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(super::first_supported(&tags(&["cs-CZ", "cs", "en"])), "cs");
+        assert_eq!(super::first_supported(&tags(&["nl-NL", "cs"])), "cs");
+        assert_eq!(super::first_supported(&tags(&["en-US", "cs"])), "en");
+        assert_eq!(super::first_supported(&tags(&["nl-NL"])), "en");
+        assert_eq!(super::first_supported(&tags(&[])), "en");
+    }
 
     fn keys(nodes: &[MenuNode], out: &mut BTreeSet<(String, String)>) {
         for node in nodes {
