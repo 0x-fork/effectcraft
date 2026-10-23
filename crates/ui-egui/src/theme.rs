@@ -412,8 +412,12 @@ fn install_script_fallbacks(family_fonts: &mut FontDefinitions, language: &str) 
         // needed by the actual interface catalog instead of assuming whole-script coverage.
         let extra = if is_chinese(language) { crate::i18n::catalog_characters(language) } else { Vec::new() };
         let extra: Vec<_> = extra.into_iter().filter(|ch| *ch >= '\u{2e80}').map(|ch| (ch, "catalog-system")).collect();
+        // 256-character blocks where a catalog character found no face: with nothing installed
+        // covering them, each lookup would read every installed font file again.
+        let mut uncovered_blocks = std::collections::HashSet::new();
         for &(probe, name) in cjk.iter().chain(SCRIPT_PROBES).chain(std::iter::once(&HANGUL)).chain(&extra) {
-            if name == "catalog-system" && seen.iter().any(|&id| fonts::face(id).has_char(probe)) {
+            let catalog = name == "catalog-system";
+            if catalog && (uncovered_blocks.contains(&(probe as u32 >> 8)) || seen.iter().any(|&id| fonts::face(id).has_char(probe))) {
                 continue;
             }
             // The interface asks for the platform's UI face first; the order a composed frame
@@ -427,12 +431,15 @@ fn install_script_fallbacks(family_fonts: &mut FontDefinitions, language: &str) 
                     (!r.missing && fonts::face(r.face).has_char(probe)).then_some(r.face)
                 })
                 .unwrap_or_else(|| fonts::fallback_for_locale(probe, base, cjk_locale(language)));
-            if seen.contains(&id) {
-                continue;
-            }
             let face = fonts::face(id);
             if !face.has_char(probe) {
+                if catalog {
+                    uncovered_blocks.insert(probe as u32 >> 8);
+                }
                 continue; // nothing installed covers this script
+            }
+            if seen.contains(&id) {
+                continue;
             }
             let Some(font) = face.font() else { continue };
             seen.push(id);
