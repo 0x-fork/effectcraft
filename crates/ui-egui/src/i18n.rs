@@ -81,27 +81,44 @@ fn system_language() -> &'static str {
         LANGUAGE.get_or_init(|| supported(sys_locale::get_locale().as_deref()))
     }
     #[cfg(target_arch = "wasm32")]
-    first_supported(SYSTEM_LOCALES.get().map(Vec::as_slice).unwrap_or_default())
+    {
+        let (requested, browser) = SYSTEM_LOCALES.get().map(|(r, b)| (r.as_deref(), b.as_slice())).unwrap_or_default();
+        first_supported(requested, browser, web_draws)
+    }
 }
 
-/// The browser's preferred languages, most preferred first (`?lang=` in the address, then
-/// `navigator.languages`), for Match System in the web build.
-static SYSTEM_LOCALES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+/// The page's `?lang=`, then the browser's preferred languages, most preferred first
+/// (`navigator.languages`), for Match System in the web build.
+static SYSTEM_LOCALES: std::sync::OnceLock<(Option<String>, Vec<String>)> = std::sync::OnceLock::new();
 
-/// Tell Match System the system's preferred languages (the web build has no locale probe of its
-/// own). Set before the first frame; only the first call counts.
-pub fn set_system_locales(tags: Vec<String>) {
-    let _ = SYSTEM_LOCALES.set(tags);
+/// Tell Match System the language the page asks for (`?lang=`) and the browser's preferred
+/// languages (the web build has no locale probe of its own). Set before the first frame; only
+/// the first call counts.
+pub fn set_system_locales(requested: Option<String>, browser: Vec<String>) {
+    let _ = SYSTEM_LOCALES.set((requested, browser));
 }
 
-/// The first of `tags` EffectCraft has a catalog for (English counts), else English: someone who
-/// prefers Dutch, then Czech, gets Czech.
+/// `requested` when EffectCraft has a catalog for it, else the first of `browser` it has a
+/// catalog for and `drawable` accepts (English counts), else English: someone who prefers Dutch,
+/// then Czech, gets Czech.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-fn first_supported(tags: &[String]) -> &'static str {
-    tags.iter()
-        .map(|t| (t, supported(Some(t))))
-        .find(|(t, code)| *code != "en" || t.split(['-', '_']).next().is_some_and(|p| p.eq_ignore_ascii_case("en")))
-        .map_or("en", |(_, code)| code)
+fn first_supported(requested: Option<&str>, browser: &[String], drawable: impl Fn(&str) -> bool) -> &'static str {
+    let english = |t: &str| t.split(['-', '_']).next().is_some_and(|p| p.eq_ignore_ascii_case("en"));
+    requested
+        .map(|t| (t, true))
+        .into_iter()
+        .chain(browser.iter().map(|t| (t.as_str(), false)))
+        .map(|(t, asked)| (t, asked, supported(Some(t))))
+        .find(|(t, asked, code)| (*code != "en" && (*asked || drawable(code))) || english(t))
+        .map_or("en", |(_, _, code)| code)
+}
+
+/// Whether the web build can draw `language`'s interface. It installs no system fonts and its
+/// bundled faces have no CJK or Georgian glyphs, so Match System skips those browser languages
+/// rather than draw boxes; `?lang=` and a language chosen in Settings still select them.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn web_draws(language: &str) -> bool {
+    !matches!(language, "ja" | "zh-hans" | "zh-hant" | "ka")
 }
 
 /// The language EffectCraft shows for a BCP 47 locale (`ja-JP` → `ja`, `zh-Hans-CN` → `zh-hans`,
@@ -7378,11 +7395,25 @@ mod tests {
     #[test]
     fn match_system_takes_the_first_browser_language_with_a_catalog() {
         let tags = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(super::first_supported(&tags(&["cs-CZ", "cs", "en"])), "cs");
-        assert_eq!(super::first_supported(&tags(&["nl-NL", "cs"])), "cs");
-        assert_eq!(super::first_supported(&tags(&["en-US", "cs"])), "en");
-        assert_eq!(super::first_supported(&tags(&["nl-NL"])), "en");
-        assert_eq!(super::first_supported(&tags(&[])), "en");
+        let any = |_: &str| true;
+        assert_eq!(super::first_supported(None, &tags(&["cs-CZ", "cs", "en"]), any), "cs");
+        assert_eq!(super::first_supported(None, &tags(&["nl-NL", "cs"]), any), "cs");
+        assert_eq!(super::first_supported(None, &tags(&["en-US", "cs"]), any), "en");
+        assert_eq!(super::first_supported(None, &tags(&["nl-NL"]), any), "en");
+        assert_eq!(super::first_supported(None, &tags(&[]), any), "en");
+        assert_eq!(super::first_supported(Some("uk"), &tags(&["cs"]), any), "uk");
+        assert_eq!(super::first_supported(Some("nl"), &tags(&["cs"]), any), "cs");
+    }
+
+    /// The web build installs no CJK or Georgian font: Match System passes over those browser
+    /// languages, while `?lang=` still selects them.
+    #[test]
+    fn web_match_system_skips_languages_without_a_font() {
+        let tags = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(super::first_supported(None, &tags(&["ja-JP", "zh-CN", "zh-TW", "ka-GE", "cs"]), super::web_draws), "cs");
+        assert_eq!(super::first_supported(None, &tags(&["ka"]), super::web_draws), "en");
+        assert_eq!(super::first_supported(Some("ka"), &tags(&["cs"]), super::web_draws), "ka");
+        assert_eq!(super::first_supported(Some("ja"), &tags(&[]), super::web_draws), "ja");
     }
 
     fn keys(nodes: &[MenuNode], out: &mut BTreeSet<(String, String)>) {
