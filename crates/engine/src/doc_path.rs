@@ -50,9 +50,7 @@ pub fn resolve(stored: &str, project: Option<&str>) -> Result<PathBuf, NotFollow
         // Resolved, but still relative: it would be taken from the working directory, which the
         // project does not choose. A Windows drive or share path (`C:\x`) stays invalid outside
         // Windows even with a project.
-        Refused::Invalid
-            if project.is_none() && craft_docpath::resolve(stored, None).is_ok_and(|p| cfg!(windows) || !is_windows_rooted(&p)) =>
-        {
+        Refused::Invalid if project.is_none() && craft_docpath::resolve(stored, None).is_ok_and(|p| cfg!(windows) || !is_windows_rooted(&p)) => {
             NotFollowed::NoProjectFolder
         }
         why => NotFollowed::Refused(why),
