@@ -754,17 +754,33 @@ fn reveal_in_finder(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn reveal_source(s: &mut Session, p: &Value) -> Result<Value> {
-    let item = source_item(s, p, "layer.revealSource")?;
-    s.state.project_selection = vec![item];
-    frontend(s, "window.panel", &json!({"panel": "project"}))?;
-    Ok(json!({"item": item.0}))
+    let (cid, ids) = layers_p(s, p)?;
+    let mut items: Vec<ItemId> = Vec::new();
+    {
+        let comp = s.project.comp(cid).ok_or(EngineError::NoComp)?;
+        for layer in ids.iter().filter_map(|id| comp.layer(*id)) {
+            if let Some(item) = layer.source.item()
+                && s.project.item(item).is_some()
+                && !items.contains(&item)
+            {
+                items.push(item);
+            }
+        }
+    }
+    if items.is_empty() {
+        return Err(bad("layer.revealSource", "the selected layers have no source item"));
+    }
+    s.state.project_selection = items.clone();
+    let raw: Vec<u64> = items.iter().map(|item| item.0).collect();
+    frontend(s, "project.reveal", &json!({"items": raw}))?;
+    Ok(json!({"item": items[0].0, "items": raw}))
 }
 
 fn reveal_comp(s: &mut Session, p: &Value) -> Result<Value> {
     let cid = comp_id(s, p)?;
     s.state.project_selection = vec![cid];
-    frontend(s, "window.panel", &json!({"panel": "project"}))?;
-    Ok(json!({"item": cid.0}))
+    frontend(s, "project.reveal", &json!({"items": [cid.0]}))?;
+    Ok(json!({"item": cid.0, "items": [cid.0]}))
 }
 
 impl Session {
@@ -909,7 +925,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("layer.trackMatte", "Track Matte", [], None, "{layers?, op: none|alpha|alphaInverted|luma|lumaInverted|above|below}", has_layers, track_matte_op),
         cmd!("layer.openSource", "Open Layer Source", ["Layer"], None, "{layer?}", has_source_item, open_source),
         cmd!("layer.revealInFinder", "Reveal in Finder", ["Layer"], None, "{layer?}", has_footage_layer, reveal_in_finder),
-        cmd!("layer.revealSource", "Reveal Layer Source in Project", ["Layer", "Reveal"], None, "{layer?}", has_source_item, reveal_source),
+        cmd!("layer.revealSource", "Reveal Layer Source in Project", ["Layer", "Reveal"], None, "{layers?}", has_source_item, reveal_source),
         cmd!("comp.revealInProject", "Reveal Composition in Project", ["Layer", "Reveal"], None, "{comp?}", has_comp, reveal_comp),
         cmd!("layer.revealExpressionErrors", "Reveal Expression Errors", ["Layer", "Reveal"], None, "{comp?}", has_comp, reveal_expression_errors),
         cmd!(

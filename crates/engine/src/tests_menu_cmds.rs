@@ -726,6 +726,37 @@ fn reveal_properties() {
 }
 
 #[test]
+fn reveal_layer_source_selects_each_layers_source_item() {
+    let mut s = comp();
+    let a = solid(&mut s, "#ff0000");
+    let b = solid(&mut s, "#00ff00");
+    let ia = layer(&s, a).source.item().unwrap();
+    let ib = layer(&s, b).source.item().unwrap();
+    assert_ne!(ia, ib);
+    s.execute("layer.select", json!({"layers": [a, b]})).unwrap();
+    let r = s.execute("layer.revealSource", json!({})).unwrap();
+    assert_eq!(r["item"], ia.0);
+    assert_eq!(r["items"], json!([ia.0, ib.0]));
+    assert_eq!(s.state.project_selection, vec![ia, ib]);
+    assert_eq!(frontend_events(&mut s), vec![("project.reveal".to_string(), json!({"items": [ia.0, ib.0]}))]);
+    // A null has no source. Alone it is refused; in a mixed selection only the sources are revealed.
+    let n = s.execute("layer.newNull", json!({})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("layer.select", json!({"layers": [n]})).unwrap();
+    assert!(s.execute("layer.revealSource", json!({})).is_err());
+    s.execute("layer.select", json!({"layers": [n, a]})).unwrap();
+    let r = s.execute("layer.revealSource", json!({})).unwrap();
+    assert_eq!(r["items"], json!([ia.0]));
+    assert_eq!(s.state.project_selection, vec![ia]);
+    // Reveal Composition in Project opens the same panel and folders.
+    let cid = s.active_comp_id().unwrap();
+    s.drain_events();
+    let r = s.execute("comp.revealInProject", json!({"comp": cid.0})).unwrap();
+    assert_eq!(r["item"], cid.0);
+    assert_eq!(s.state.project_selection, vec![cid]);
+    assert_eq!(frontend_events(&mut s), vec![("project.reveal".to_string(), json!({"items": [cid.0]}))]);
+}
+
+#[test]
 fn sequence_layers() {
     let mut s = comp();
     let a = solid(&mut s, "#ff0000");
