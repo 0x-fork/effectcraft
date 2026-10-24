@@ -8,14 +8,16 @@ use serde_json::{Value, json};
 
 use crate::Session;
 
-/// Probes every file as a 64×32 still (the media layer's single-file probe).
+/// Probes every file as a still 64 + its byte length wide and 32 high (the media layer's
+/// single-file probe).
 struct Stills;
 impl crate::Importer for Stills {
     fn probe(&self, path: &str) -> Result<Footage, String> {
         if !std::path::Path::new(path).is_file() {
             return Err(format!("{path}: no such file"));
         }
-        Ok(Footage { path: path.into(), kind: FootageKind::Still, width: 64, height: 32, has_video: true, codec: "PNG".into(), ..Default::default() })
+        let width = 64 + std::fs::metadata(path).map_or(0, |m| m.len() as u32);
+        Ok(Footage { path: path.into(), kind: FootageKind::Still, width, height: 32, has_video: true, codec: "PNG".into(), ..Default::default() })
     }
 }
 
@@ -194,6 +196,19 @@ fn replace_footage_and_reload_keep_sequences() {
     let (_, f) = footage(&s, &item);
     assert_eq!((f.sequence.len(), f.frame_rate, f.start_timecode), (5, FrameRate::from_f64(12.0), Some(2)));
     assert_eq!(f.duration, FrameRate::from_f64(12.0).tick_of(5));
+}
+
+/// #2074: reloading a numbered still probed it as its run, so it took the first file's size.
+#[test]
+fn reloading_a_numbered_still_measures_its_own_file() {
+    let dir = folder(&RUN);
+    let mut s = session();
+    let item = s.execute("file.import", json!({"paths": [at(&dir, "shot_0002.png")], "sequence": false})).unwrap()["items"][0].clone();
+    std::fs::write(at(&dir, "shot_0002.png"), [0; 16]).unwrap();
+    s.execute("file.reloadFootage", json!({"items": [item]})).unwrap();
+    let (name, f) = footage(&s, &item);
+    assert_eq!((name.as_str(), f.kind, f.width, f.sequence.len()), ("shot_0002.png", FootageKind::Still, 80, 0));
+    assert_eq!(f.path, at(&dir, "shot_0002.png"));
 }
 
 /// #756: numbered DPX and Cineon scans import as sequences, as in After Effects (`.cin` was not
