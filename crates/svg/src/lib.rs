@@ -635,14 +635,16 @@ impl<'a, 'i> Parser<'a, 'i> {
         if !self.charge_css(buckets.iter().map(|b| b.len()).fold(0, usize::saturating_add)) {
             return;
         }
-        let mut matching: Vec<&Rule> = buckets
-            .iter()
-            .flat_map(|b| b.iter())
-            .filter_map(|&i| css.rules.get(i))
+        let candidates = || buckets.iter().flat_map(|b| b.iter()).filter_map(|&i| css.rules.get(i));
+        // A selector like `.z.z.z…` checks each of its classes: charge them too.
+        if !self.charge_css(candidates().map(|r| r.classes.len()).fold(0, usize::saturating_add)) {
+            return;
+        }
+        let mut matching: Vec<&Rule> = candidates()
             .filter(|r| {
                 r.tag.as_deref().is_none_or(|t| t == tag)
                     && r.id.as_deref().is_none_or(|i| Some(i) == id)
-                    && r.classes.iter().all(|c| classes.contains(&c.as_str()))
+                    && r.classes.iter().all(|c| classes.binary_search(&c.as_str()).is_ok())
             })
             .collect();
         matching.sort_by_key(|r| (r.specificity, r.order));

@@ -380,6 +380,22 @@ fn huge_class_lists_count_against_the_matching_budget() {
 }
 
 #[test]
+fn a_selector_with_many_classes_counts_against_the_matching_budget() {
+    // `.z.z.z…` lands in one class bucket, but each match checks every class it lists.
+    let rule = ".z".repeat(300_000);
+    let uses: String = (0..200).map(|i| format!(r##"<use href="#r" x="{i}"/>"##)).collect();
+    let svg = |uses: &str| {
+        format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>{rule}{{fill:red}}</style><defs><rect id="r" width="1" height="1" class="z"/></defs>{uses}</svg>"##
+        )
+    };
+    let e = parse(svg(&uses).as_bytes()).unwrap_err();
+    assert!(e.to_string().contains("<style> rules"), "{e}");
+    let few: String = uses.split_inclusive("/>").take(10).collect();
+    assert!(parse(svg(&few).as_bytes()).is_ok());
+}
+
+#[test]
 fn matching_work_past_the_budget_errors_without_doing_it() {
     // Within both sheet caps, yet one rectangle would apply 10 000 x 5 001 declarations.
     let sels = vec!["rect"; 10_000].join(",");
