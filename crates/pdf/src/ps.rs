@@ -1271,31 +1271,33 @@ impl Interp {
             }
             // `source [params] /Name filter`. A SubFileDecode of the current file with a count of
             // 0 reads to its end-of-data string: skip that data (an embedded XMP packet, which
-            // otherwise ran as PostScript). Other filters stand for the file they read.
+            // otherwise ran as PostScript). Other filters read what their source reads.
             "filter" => {
                 let name = self.pop().key();
-                if name == "SubFileDecode" {
+                let mut skipped = false;
+                let source = if name == "SubFileDecode" && !matches!(self.st.last(), Some(V::Dict(_))) {
                     let eod = match self.pop() {
                         V::Str(s) => s.borrow().clone(),
                         _ => vec![],
                     };
                     let count = self.popn();
-                    if let V::File = self.pop()
-                        && count == 0.0
-                        && !eod.is_empty()
-                    {
+                    let source = self.pop();
+                    if matches!(source, V::File) && count == 0.0 && !eod.is_empty() {
                         src.pos = match find_from(src.d, &eod, src.pos) {
                             Some(p) => p.saturating_add(eod.len()),
                             None => src.d.len(),
                         };
+                        skipped = true;
                     }
+                    source
                 } else {
                     if matches!(self.st.last(), Some(V::Dict(_))) {
                         self.pop();
                     }
-                    self.pop();
-                }
-                self.push(V::File);
+                    self.pop()
+                };
+                // Data already stepped over leaves nothing for `image` to skip.
+                self.push(if skipped { V::Null } else { source });
             }
             "vmstatus" => {
                 for _ in 0..3 {

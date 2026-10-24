@@ -46,6 +46,16 @@ fn eps_with_aliased_operators_device_queries_and_embedded_data_draws() {
 }
 
 #[test]
+fn eps_filter_on_a_string_source_does_not_skip_the_program() {
+    let square = "1 0 0 setrgbcolor 50 25 moveto 150 25 lineto 150 75 lineto 50 75 lineto closepath fill\n";
+    let img = "gsave 1 1 8 [1 0 0 1 0 0] (FF) /ASCIIHexDecode filter image grestore\n";
+    // Images aren't drawn yet, so this parses without `eps`'s nothing-skipped check.
+    let doc = parse(format!("%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 200 100\n{img}{square}").as_bytes()).unwrap();
+    assert_eq!(doc.skipped, ["image"]);
+    assert!(coverage(&render(&doc), 50, 25, 150, 75) > 4900.0, "drawing after an image read from a string");
+}
+
+#[test]
 fn eps_text_with_bundled_fonts_and_show_variants() {
     // Not embedded: drawn with the bundled stand-in, like the same text in a PDF.
     let doc = eps(b"/Helvetica findfont 40 scalefont setfont 10 30 moveto (Hi) show\n");
