@@ -525,11 +525,26 @@ pub(crate) fn c(r: f64, g: f64, b: f64) -> Value {
 }
 
 #[test]
+fn small_blurs_fall_back_to_the_cpu() {
+    // #1939: small Gaussian sigmas and fractional box radii render on the CPU kernel.
+    for (id, vals) in [("ec.blur.gaussian", [("blurriness", n(0.9))]), ("ec.blur.fastbox", [("radius", n(1.5))])] {
+        let mut s = Scene::new(BitDepth::Bpc32);
+        let bg = s.solid([0.15, 0.1, 0.2], 97, 61);
+        s.push(bg);
+        let mut l = s.footage(70, 44);
+        s.effect(&mut l, id, &vals);
+        s.push(l);
+        check(&format!("{id} {vals:?}"), compare_at(&s, opts(), Tick::ZERO), 0.0);
+    }
+}
+
+#[test]
 fn gpu_effects_match_cpu() {
-    effect_case("ec.blur.gaussian", &[("blurriness", n(9.0))]);
-    effect_case("ec.blur.gaussian", &[("blurriness", n(4.0)), ("dimensions", Value::Enum(1)), ("repeatEdge", Value::Bool(true))]);
-    effect_case("ec.blur.fastbox", &[("radius", n(5.0)), ("iterations", n(2.0))]);
-    effect_case("ec.blur.fastbox", &[("radius", n(3.0)), ("dimensions", Value::Enum(2)), ("repeatEdge", Value::Bool(true))]);
+    // Sigma 3 px and up and even radii, so the half-scale pass stays on the GPU too (#1939).
+    effect_case("ec.blur.gaussian", &[("blurriness", n(14.0))]);
+    effect_case("ec.blur.gaussian", &[("blurriness", n(12.0)), ("dimensions", Value::Enum(1)), ("repeatEdge", Value::Bool(true))]);
+    effect_case("ec.blur.fastbox", &[("radius", n(6.0)), ("iterations", n(2.0))]);
+    effect_case("ec.blur.fastbox", &[("radius", n(4.0)), ("dimensions", Value::Enum(2)), ("repeatEdge", Value::Bool(true))]);
     effect_case("ec.blur.directional", &[("direction", n(30.0)), ("length", n(12.0))]);
     effect_case("ec.stylize.glow", &[("threshold", n(40.0)), ("radius", n(14.0)), ("intensity", n(1.5))]);
     effect_case("ec.stylize.glow", &[("colors", Value::Enum(1)), ("operation", Value::Enum(1)), ("colorA", c(1.0, 0.8, 0.1))]);
