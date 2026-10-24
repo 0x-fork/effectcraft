@@ -1098,7 +1098,7 @@ fn cid_width_entries_at_the_top_of_the_cid_range_do_not_overflow() {
     let load = |entry: &str| {
         let type0 = "<< /Type /Font /Subtype /Type0 /BaseFont /X /Encoding /Identity-H /DescendantFonts [13 0 R] >>";
         let desc = format!("<< /Type /Font /Subtype /CIDFontType2 {entry} >>");
-        let file = object::File::parse(&page_pdf("", "", vec![(10, type0.into(), None), (13, desc, None)])).unwrap();
+        let file = object::File::parse(&page_pdf("", "/Font << /F1 10 0 R >>", vec![(10, type0.into(), None), (13, desc, None)])).unwrap();
         let d = file.objects.get(&(10, 0)).and_then(object::Obj::dict).unwrap();
         font::Font::load(&file, d, &mut vec![])
     };
@@ -1127,7 +1127,7 @@ fn cmap_entries_at_the_top_of_the_code_range_do_not_overflow() {
         (14, "<< >>".into(), Some(to_unicode.as_bytes().to_vec())),
         (15, "<< /Type /CMap >>".into(), Some(encoding.as_bytes().to_vec())),
     ];
-    let file = object::File::parse(&page_pdf("", "", objs)).unwrap();
+    let file = object::File::parse(&page_pdf("", "/Font << /F1 10 0 R >>", objs)).unwrap();
     let d = file.objects.get(&(10, 0)).and_then(object::Obj::dict).unwrap();
     let f = font::Font::load(&file, d, &mut vec![]);
     assert_eq!((f.unicode(0xFFFF_FFFF), f.unicode(0)), ("A".to_string(), String::new()));
