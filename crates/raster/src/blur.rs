@@ -168,7 +168,8 @@ pub fn gaussian_is_exact(sigma_x: f64, sigma_y: f64) -> bool {
 
 /// One separable pass of a sampled Gaussian (radius 3 sigma) along x or y.
 fn gauss_pass(img: &Image, sigma: f64, vertical: bool, repeat: bool) -> Image {
-    if sigma <= 0.0 || img.is_empty() {
+    // Below 1e-3 the kernel is the identity in f64; tiny sigmas would also make 2σ² underflow to 0 (NaN taps).
+    if sigma.is_nan() || sigma <= 1e-3 || img.is_empty() {
         return img.clone();
     }
     let r = (sigma * 3.0).ceil() as i64;
@@ -269,6 +270,17 @@ mod tests {
         let sum: f32 = b.data.iter().map(|p| p[3]).sum();
         assert!((sum - 1.0).abs() < 1e-3, "{sum}");
         assert!(b.get(32, 32)[3] < 0.05);
+    }
+
+    #[test]
+    fn vanishing_or_nan_sigma_leaves_the_image_unchanged() {
+        let mut img = Image::new(5, 5);
+        img.set(2, 2, [1.0, 0.5, 0.25, 1.0]);
+        for s in [1e-200, f64::MIN_POSITIVE, f64::NAN] {
+            let b = gaussian_blur_exact(&img, s, s, false);
+            assert!(b.data.iter().all(|p| p.iter().all(|v| v.is_finite())), "sigma {s}");
+            assert_eq!(b, img, "sigma {s}");
+        }
     }
 
     #[test]
