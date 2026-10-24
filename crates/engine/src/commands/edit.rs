@@ -1,6 +1,7 @@
 //! Edit menu.
 
 use effectcraft_color::Label;
+use effectcraft_keyframe::Value as KV;
 use effectcraft_project::{Comp, Expression, ItemKind, Layer, LayerId, LayerSource, TrackMatte};
 use effectcraft_time::Tick;
 use serde_json::{Value, json};
@@ -201,6 +202,21 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             if l.track_matte.is_some_and(|m| ids.contains(&m.layer)) {
                 l.track_matte = None;
             }
+            // A layer-reference property (an Environment light's Source, an effect's Clone Source,
+            // Back Layer…) must read as None once its layer is gone, in this same history step: a
+            // dead id renders as nothing while the UI shows "None", which means "fall back to the
+            // comp's Environment Layer" (#2153). Keys carry the same value kind as the property.
+            l.props.walk_mut(&mut |p| {
+                let dead = |v: &KV| matches!(v, KV::Layer(Some(id)) if ids.contains(&LayerId(*id)));
+                if dead(&p.value) {
+                    p.value = KV::Layer(None);
+                }
+                for k in &mut p.keys {
+                    if dead(&k.value) {
+                        k.value = KV::Layer(None);
+                    }
+                }
+            });
         }
         st.selected_layers.clear();
         st.selected_props.clear();
