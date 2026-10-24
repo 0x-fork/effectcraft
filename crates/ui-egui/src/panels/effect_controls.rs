@@ -337,10 +337,7 @@ fn prop_row(
                 ParamUi::Percent => "%",
                 _ => "",
             };
-            let speed = match &prop.ui {
-                ParamUi::Slider { slider_min, slider_max, .. } => ((slider_max - slider_min) / 300.0).clamp(0.001, 50.0),
-                _ => 0.5,
-            };
+            let speed = widgets::slider_scrub_speed(&prop.ui);
             let (vr, nv, _) = widgets::hot_number_at(
                 ui,
                 pos2(vx, cy - 9.0),
