@@ -557,6 +557,44 @@ pub fn popup_menu(ui: &mut Ui, id: egui::Id, pos: egui::Pos2, options: &[String]
     })
 }
 
+/// The drop-down for a layer-valued property (`ParamUi::Layer`): the current layer shown as
+/// "N. name" (or "None"), and a popup of "None" plus every layer of the comp. Effect Controls
+/// and the Timeline share it so a layer reference (an Environment light's Source, a Displacement
+/// Map's layer) is picked the same way in every panel, and the reference is shown as its layer's
+/// index and name rather than its internal id. Returns `Some(chosen)` when the user picked —
+/// the layer's id, or `None` for "None" — and `None` while nothing is chosen; the caller writes
+/// it as an undoable `prop.set` (id, or null for "None").
+pub fn layer_picker(
+    ui: &mut Ui,
+    rect: Rect,
+    layers: &[effectcraft_engine::project::Layer],
+    current: Option<u64>,
+    t: &Tokens,
+    id: egui::Id,
+) -> Option<Option<u64>> {
+    let index_of = |wanted: u64| layers.iter().position(|l| l.id.0 == wanted);
+    let entry = |i: usize| layers.get(i).map(|l| format!("{}. {}", i + 1, l.name));
+    let current_index = current.and_then(index_of);
+    let label = current_index.and_then(entry).unwrap_or_else(|| crate::i18n::tr("None").to_string());
+    let pop = id.with("pop");
+    if dropdown(ui, rect, &label, t, id).clicked() {
+        open_popup(ui, pop);
+    }
+    if !popup_is_open(ui, pop) {
+        return None;
+    }
+    // Built only while open: a comp can hold hundreds of layers.
+    let mut options: Vec<String> = Vec::with_capacity(layers.len() + 1);
+    options.push(crate::i18n::tr("None").to_string());
+    options.extend((0..layers.len()).filter_map(entry));
+    // The current entry is highlighted (the first option is "None").
+    match popup_menu(ui, pop, rect.left_bottom(), &options, Some(current_index.map_or(0, |i| i + 1))) {
+        Some(0) => Some(None),
+        Some(picked) => layers.get(picked - 1).map(|l| Some(l.id.0)),
+        None => None,
+    }
+}
+
 /// The open popup list `id` at `pos`, drawn by `body` (`rows` entries and `seps` separators,
 /// for its height): as tall as the window allows, scrolling beyond with a scroll bar (a shape
 /// layer's Add menu has 20 entries, the blend modes 40, the fonts hundreds), and moved up when
