@@ -55,6 +55,17 @@ fn eps_filter_on_a_string_source_does_not_skip_the_program() {
     assert!(coverage(&render(&doc), 50, 25, 150, 75) > 4900.0, "drawing after an image read from a string");
 }
 
+/// A loaded operator runs that operator even after its name is redefined (the prolog idiom
+/// `/_m /moveto load def /moveto {… _m} def`), and an executable name bound with `cvx` runs what
+/// its name is bound to.
+#[test]
+fn eps_loaded_operators_and_executable_name_aliases() {
+    let saved = "/_m /moveto load def /moveto {_m} def 1 0 0 setrgbcolor 50 25 moveto 150 25 lineto 150 75 lineto 50 75 lineto closepath fill\n";
+    assert!(coverage(&render(&eps(saved.as_bytes())), 50, 25, 150, 75) > 4900.0, "a redefined moveto that calls the saved one");
+    let alias = "/sq {50 25 moveto 150 25 lineto 150 75 lineto 50 75 lineto closepath fill} def /y /sq cvx def 1 0 0 setrgbcolor y\n";
+    assert!(coverage(&render(&eps(alias.as_bytes())), 50, 25, 150, 75) > 4900.0, "an executable name bound to a procedure's name");
+}
+
 /// Each `exec` of the executable name `exec` runs the next one: the chain is cut off at the call
 /// depth instead of overflowing the stack.
 #[test]

@@ -28,6 +28,8 @@ enum V {
     Name(Rc<str>),
     /// A literal name (`/name`).
     Lit(Rc<str>),
+    /// A built-in operator, as `load` returns it for a name no dictionary defines.
+    Op(Rc<str>),
     Str(Rc<RefCell<Vec<u8>>>),
     Proc(Rc<Vec<V>>),
     Array(Rc<RefCell<Vec<V>>>),
@@ -47,7 +49,7 @@ impl V {
     }
     fn key(&self) -> String {
         match self {
-            V::Name(n) | V::Lit(n) => n.to_string(),
+            V::Name(n) | V::Lit(n) | V::Op(n) => n.to_string(),
             V::Str(s) => String::from_utf8_lossy(&s.borrow()).into_owned(),
             V::Num(n) => format!("{n}"),
             V::Bool(b) => format!("{b}"),
@@ -441,6 +443,12 @@ impl Interp {
                                 break;
                             }
                         }
+                        V::Op(op) => {
+                            r = self.spend(1).and_then(|()| self.builtin(op, src));
+                            if r.is_err() {
+                                break;
+                            }
+                        }
                         // Other items count against the budget as names do.
                         other => {
                             r = self.spend(1);
@@ -465,6 +473,10 @@ impl Interp {
                 self.calls -= 1;
                 r
             }
+            V::Op(op) => {
+                self.spend(1)?;
+                self.builtin(&op, src)
+            }
             other => {
                 self.push(other);
                 Ok(())
@@ -480,7 +492,9 @@ impl Interp {
                 // An operator stored under another name (`/mo /moveto load def`, as Illustrator's
                 // EPS prolog does for every path operator) runs that operator. It pushed the
                 // operator's name instead, so such files drew nothing (#955).
-                V::Name(op) => self.builtin(&op, src),
+                V::Op(op) => self.builtin(&op, src),
+                // An executable name (`/y /x cvx def`) runs what that name is bound to.
+                V::Name(_) => self.exec_obj(v, src),
                 other => {
                     self.push(other);
                     Ok(())
@@ -977,7 +991,7 @@ impl Interp {
             }
             "load" => {
                 let k = self.pop().key();
-                let v = self.lookup(&k).unwrap_or(V::Name(k.into()));
+                let v = self.lookup(&k).unwrap_or(V::Op(k.into()));
                 self.push(v);
             }
             "undef" => {
@@ -1174,13 +1188,14 @@ impl Interp {
             }
             "xcheck" => {
                 let v = self.pop();
-                self.push(V::Bool(matches!(v, V::Proc(_) | V::Name(_))));
+                self.push(V::Bool(matches!(v, V::Proc(_) | V::Name(_) | V::Op(_))));
             }
             "type" => {
                 let t = match self.pop() {
                     V::Num(_) => "realtype",
                     V::Bool(_) => "booleantype",
                     V::Name(_) | V::Lit(_) => "nametype",
+                    V::Op(_) => "operatortype",
                     V::Str(_) => "stringtype",
                     V::Proc(_) | V::Array(_) => "arraytype",
                     V::Dict(_) => "dicttype",
