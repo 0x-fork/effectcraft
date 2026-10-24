@@ -34,6 +34,7 @@ mod ui_inline_edit;
 mod ui_keyframes;
 mod ui_large_project;
 mod ui_layer_panel_zoom;
+mod ui_light_settings;
 mod ui_live_preview;
 mod ui_locked_color;
 mod ui_media_browser_cache;
