@@ -93,7 +93,7 @@ pub fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let d = max - min;
     let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
     let h = if max == r {
-        ((g - b) / d + if g < b { 6.0 } else { 0.0 }) / 6.0
+        (((g - b) / d + if g < b { 6.0 } else { 0.0 }) / 6.0).rem_euclid(1.0)
     } else if max == g {
         ((b - r) / d + 2.0) / 6.0
     } else {
@@ -130,7 +130,7 @@ pub fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let h = if d < 1e-7 {
         0.0
     } else if max == r {
-        ((g - b) / d).rem_euclid(6.0) / 6.0
+        (((g - b) / d).rem_euclid(6.0) / 6.0).rem_euclid(1.0)
     } else if max == g {
         ((b - r) / d + 2.0) / 6.0
     } else {
@@ -260,6 +260,14 @@ mod tests {
     fn hsv_to_rgb_tiny_negative_hue_is_red() {
         let (r, g, b) = hsv_to_rgb(-1e-9, 1.0, 1.0);
         assert!(r > 0.99 && g < 0.01 && b < 0.01, "{r} {g} {b}");
+    }
+
+    #[test]
+    fn hue_stays_below_one_for_tiny_blue() {
+        let (h, _, _) = rgb_to_hsv(1.0, 0.0, 1e-9);
+        assert!((0.0..1.0).contains(&h), "rgb_to_hsv hue {h} not in 0..1");
+        let (h, _, _) = rgb_to_hsl(1.0, 0.0, 1e-9);
+        assert!((0.0..1.0).contains(&h), "rgb_to_hsl hue {h} not in 0..1");
     }
 
     #[test]
