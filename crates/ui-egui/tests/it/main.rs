@@ -48,6 +48,7 @@ mod ui_parameter_spacing;
 mod ui_presets_folder;
 mod ui_preview_align;
 mod ui_project_delete;
+mod ui_project_duplicate;
 mod ui_project_keyboard;
 mod ui_project_new_folder;
 mod ui_project_rows;
