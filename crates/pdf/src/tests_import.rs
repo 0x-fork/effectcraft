@@ -55,6 +55,14 @@ fn eps_filter_on_a_string_source_does_not_skip_the_program() {
     assert!(coverage(&render(&doc), 50, 25, 150, 75) > 4900.0, "drawing after an image read from a string");
 }
 
+/// Each `exec` of the executable name `exec` runs the next one: the chain is cut off at the call
+/// depth instead of overflowing the stack.
+#[test]
+fn eps_exec_of_executable_names_stops_at_the_call_depth() {
+    let doc = parse(b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 200 100\n/exec cvx 99999 {dup} repeat exec\n").unwrap();
+    assert!(doc.skipped.iter().any(|s| s.contains("recursion limit")), "{:?}", doc.skipped);
+}
+
 #[test]
 fn eps_text_with_bundled_fonts_and_show_variants() {
     // Not embedded: drawn with the bundled stand-in, like the same text in a PDF.

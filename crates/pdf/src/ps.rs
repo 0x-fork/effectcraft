@@ -454,7 +454,17 @@ impl Interp {
                 self.calls -= 1;
                 r
             }
-            V::Name(n) => self.exec_name(&n, src),
+            // An executable name can run another (`exec` of `/exec cvx`), so names count too.
+            V::Name(n) => {
+                if self.calls >= MAX_CALL_DEPTH {
+                    self.b.skip("PostScript (recursion limit)");
+                    return Err(Flow::Quit);
+                }
+                self.calls += 1;
+                let r = self.exec_name(&n, src);
+                self.calls -= 1;
+                r
+            }
             other => {
                 self.push(other);
                 Ok(())
