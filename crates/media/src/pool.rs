@@ -1102,7 +1102,7 @@ mod tests {
         assert!(tone.iter().any(|v| v.abs() > 0.05), "the tone is audible at 48 kHz");
         // ...and a mix rate of 0 (which `audio_samples` itself turns away) returns a read of the
         // requested length instead of dividing by it.
-        let degenerate = pool.decode_audio(&footage, Tick::from_seconds_f64(0.1), 64, 0);
+        let degenerate = pool.try_decode_audio(&footage, Tick::from_seconds_f64(0.1), 64, 0).unwrap();
         assert_eq!(degenerate.len(), 128);
         let _ = std::fs::remove_dir_all(&dir);
     }
