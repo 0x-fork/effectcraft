@@ -132,11 +132,11 @@ pub fn data(params: &Params) -> Arc<RotoData> {
     let mut h = 0xcbf2_9ce4_8422_2325;
     fnv(&mut h, j.as_bytes());
     let c = C.get_or_init(Default::default);
-    if let Some(d) = c.lock().unwrap_or_else(|e| e.into_inner()).get(&h) {
+    if let Some(d) = c.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&h) {
         return d.clone();
     }
     let d = Arc::new(RotoData::from_json(j));
-    let mut m = c.lock().unwrap_or_else(|e| e.into_inner());
+    let mut m = c.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if m.len() > 64 {
         m.clear();
     }
@@ -247,11 +247,11 @@ fn cache() -> &'static Mutex<SegCache> {
 
 /// A cached segmentation (chain key, scale).
 pub fn cached(key: u64, scale: f64) -> Option<Arc<FrameSeg>> {
-    cache().lock().unwrap_or_else(|e| e.into_inner()).map.get(&(key, scale.to_bits())).cloned()
+    cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).map.get(&(key, scale.to_bits())).cloned()
 }
 
 pub fn store(key: u64, scale: f64, seg: Arc<FrameSeg>) {
-    let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
+    let mut c = cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let k = (key, scale.to_bits());
     if c.map.contains_key(&k) {
         return;
@@ -301,7 +301,7 @@ fn from_store(key: u64, scale: f64) -> Option<Arc<FrameSeg>> {
 /// Drop the cached segmentations of these chain keys (every scale).
 pub fn forget(keys: impl IntoIterator<Item = u64>) {
     let keys: std::collections::HashSet<u64> = keys.into_iter().collect();
-    let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
+    let mut c = cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let gone: Vec<(u64, u64)> = c.map.keys().filter(|k| keys.contains(&k.0)).copied().collect();
     for k in gone {
         if let Some(s) = c.map.remove(&k) {
@@ -313,7 +313,7 @@ pub fn forget(keys: impl IntoIterator<Item = u64>) {
 
 /// Drop every cached segmentation (Edit ▸ Purge).
 pub fn purge() {
-    let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
+    let mut c = cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     c.map.clear();
     c.order.clear();
     c.bytes = 0;
@@ -532,11 +532,11 @@ fn frozen(params: &Params) -> Option<Arc<FrozenCache>> {
     let mut h = 0xcbf2_9ce4_8422_2325;
     fnv(&mut h, j.as_bytes());
     let c = C.get_or_init(Default::default);
-    if let Some(d) = c.lock().unwrap_or_else(|e| e.into_inner()).get(&h) {
+    if let Some(d) = c.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&h) {
         return Some(d.clone());
     }
     let d = Arc::new(FrozenCache::from_json(j)?);
-    let mut m = c.lock().unwrap_or_else(|e| e.into_inner());
+    let mut m = c.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if m.len() > 8 {
         m.clear();
     }

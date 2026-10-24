@@ -315,11 +315,11 @@ fn frozen_cache(j: &str) -> Option<Arc<FrozenCache>> {
     let mut h = 0xcbf2_9ce4_8422_2325;
     fnv(&mut h, j.as_bytes());
     let c = C.get_or_init(Default::default);
-    if let Some(d) = c.lock().unwrap_or_else(|e| e.into_inner()).get(&h) {
+    if let Some(d) = c.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&h) {
         return Some(d.clone());
     }
     let d = Arc::new(FrozenCache::from_json(j)?);
-    let mut m = c.lock().unwrap_or_else(|e| e.into_inner());
+    let mut m = c.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if m.len() > 8 {
         m.clear();
     }
