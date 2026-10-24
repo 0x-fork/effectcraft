@@ -14,9 +14,8 @@ const DUPLICATE: &str = "project.context.duplicate";
 
 fn harness() -> (Harness<'static, EffectcraftApp>, ItemId, ItemId, ItemId) {
     let mut s = Session::default();
-    let mut comp = |name: &str| {
-        ItemId(s.execute("comp.new", json!({"name": name, "width": 64, "height": 64, "duration": 1})).unwrap()["comp"].as_u64().unwrap())
-    };
+    let mut comp =
+        |name: &str| ItemId(s.execute("comp.new", json!({"name": name, "width": 64, "height": 64, "duration": 1})).unwrap()["comp"].as_u64().unwrap());
     let main = comp("Main");
     let other = comp("Other");
     let folder = ItemId(s.execute("project.newFolder", json!({"name": "Bin"})).unwrap()["item"].as_u64().unwrap());

@@ -910,8 +910,8 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
             }
             let duplicate_items = targets(app, *id, selected);
             // Like Edit > Duplicate: folders disable the whole operation, including mixed selections.
-            let can_duplicate = !duplicate_items.is_empty()
-                && duplicate_items.iter().all(|id| app.session.project.item(ItemId(*id)).is_some_and(|i| !i.is_folder()));
+            let can_duplicate =
+                !duplicate_items.is_empty() && duplicate_items.iter().all(|id| app.session.project.item(ItemId(*id)).is_some_and(|i| !i.is_folder()));
             let mut duplicate = egui::Button::new(crate::i18n::tr("Duplicate"));
             if let Some(shortcut) = app.session.shortcuts().shortcut_of("edit.duplicate", &serde_json::Value::Null) {
                 duplicate = duplicate.shortcut_text(crate::menus::shortcut_text(shortcut));
