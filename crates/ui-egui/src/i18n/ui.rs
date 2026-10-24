@@ -4671,7 +4671,6 @@ const GEORGIAN: &[(&str, &str)] = &[
     ("Latest auto-save: {}", "ბოლო ავტოშენახვა: {}"),
     ("Layer", "შრე"),
     ("Layer controls", "შრის მართვის ელემენტები"),
-    ("Layer {}", "შრე {}"),
     ("Layer:", "შრე:"),
     ("Layer: {}", "შრე: {}"),
     ("Layer Styles", "შრის სტილები"),
