@@ -663,8 +663,10 @@ pub fn show(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
         {
             let ui = &mut body;
             // Page list (left, like After Effects).
-            let widest_page =
-                all.iter().map(|p| ui.painter().layout_no_wrap(tr(p.title).to_owned(), Tokens::ui(12.5), t.text).size().x).fold(0.0_f32, f32::max);
+            let widest_page = all
+                .iter()
+                .map(|p| ui.painter().layout_no_wrap(crate::i18n::settings_page_title(p.title).to_owned(), Tokens::ui(12.5), t.text).size().x)
+                .fold(0.0_f32, f32::max);
             let page_width = (widest_page + 20.0).max(176.0).min((ui.available_width() * 0.42).min(300.0));
             ui.vertical(|ui| {
                 ui.set_width(page_width + 4.0);
@@ -689,7 +691,7 @@ pub fn show(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
                             if sel { Color32::WHITE } else { t.text },
                         );
                         app.auto.add(&format!("settings.page.{}", p.id), r, p.title);
-                        if resp.on_hover_text(tr(p.title)).clicked() {
+                        if resp.on_hover_text(crate::i18n::settings_page_title(p.title)).clicked() {
                             page = p.id.to_string();
                         }
                     }
