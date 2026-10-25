@@ -56,6 +56,9 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
     let label = str_p(p, "label").unwrap_or("Batch").to_string();
     let atomic = p.get("atomic").and_then(Value::as_bool).unwrap_or(true);
     let (project, history, state) = (s.project.clone(), s.history.clone(), s.state.clone());
+    // Rolled-back steps may have queued events (an `OpenComp`, a Toast) for the state that is
+    // about to be dropped: the UI must not act on them.
+    let event_mark = s.events.len();
     let mut results: Vec<Value> = Vec::with_capacity(steps.len());
     for (i, step) in steps.iter().enumerate() {
         let run = |s: &mut Session, results: &[Value]| -> Result<Value> {
@@ -87,6 +90,7 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
                     s.project = project;
                     s.history = history;
                     s.state = state;
+                    s.events.truncate(event_mark);
                     s.sanitize_after_replacement(edited.as_ref());
                     s.ime_revision = s.ime_revision.max(interim_revision);
                     s.bump();
