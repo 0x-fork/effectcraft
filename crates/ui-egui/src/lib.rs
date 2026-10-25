@@ -29,6 +29,7 @@ mod pointer_wrap;
 pub mod prefs_live;
 pub mod state;
 pub mod theme;
+pub mod updates_ui;
 pub mod widgets;
 mod workspace_state;
 
@@ -491,6 +492,7 @@ pub struct EffectcraftApp {
     pub audio: Option<audio::AudioPlayback>,
     /// Audio scrubbing's open output (Ctrl/Cmd-drag the current time, `playback.scrubAudio`).
     pub scrub: Option<audio::AudioScrub>,
+    pub(crate) updates_rt: updates_ui::Runtime,
     /// Audio panel VU meters.
     pub meter: audio::Meter,
     /// Waveform peak summaries per footage item (see `panels::waveform`).
@@ -634,6 +636,7 @@ impl EffectcraftApp {
             window_title: String::new(),
             template_thumbs: Default::default(),
             template_list: None,
+            updates_rt: updates_ui::Runtime::default(),
         }
         .with_ui_commands()
     }
@@ -2231,6 +2234,7 @@ impl EffectcraftApp {
         }
         // Frames and worker completions wake the app even while it is hidden.
         self.frames.set_context(ctx);
+        updates_ui::tick(self, ctx);
         if self.session.render_job.is_some() {
             self.session.poll_render();
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
@@ -2482,6 +2486,7 @@ impl EffectcraftApp {
         panels::precomp::mini_flowchart(self, &ctx);
         panels::home::capture_thumbnail(self);
         panels::dialogs::show(self, &ctx);
+        updates_ui::show(self, &ctx);
         panels::scriptui_view::sync_panels(self);
         panels::scriptui_view::show_windows(self, &ctx);
         panels::learn::coach(self, &ctx);

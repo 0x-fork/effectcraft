@@ -149,6 +149,11 @@ fn install_file_dialogs(app: &mut EffectcraftApp) -> Option<std::sync::mpsc::Rec
 }
 
 fn main() -> eframe::Result {
+    // Windows: the update helper is a copy of this program started with `--finish-update`.
+    #[cfg(windows)]
+    if let Some(result) = craft_update::self_update::finish(&craft_update::suite::EFFECTCRAFT, &std::env::args_os().skip(1).collect::<Vec<_>>()) {
+        std::process::exit(i32::from(result.is_err()));
+    }
     // First, so the panic hook and every start-up warning are recorded. Records go to stderr
     // and the session log; Help ▸ Enable Logging writes through this logger too, and warnings
     // feed the compatibility report.
@@ -274,6 +279,7 @@ fn main() -> eframe::Result {
             // reported in a toast and forgotten).
             let _ = session.execute("window.restoreScriptPanels", json!({}));
             let mut app = EffectcraftApp::new(session);
+            app.set_startup_update_check(true);
             app.set_gpu_failure_bridge(gpu_failures);
             app.ui.start_screen = show_home;
             if let Some(n) = notice {

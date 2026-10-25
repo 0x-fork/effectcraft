@@ -13,6 +13,7 @@ repository = "https://github.com/storytold/effectcraft"
 [workspace.dependencies]
 craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "a0916808f7d78bed8c7b90cdf937176015454a7f", version = "=0.1.0", default-features = false, features = ["read"] }
 craft-docpath = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a0916808f7d78bed8c7b90cdf937176015454a7f" }
+craft-update = { git = "https://github.com/storytold/craft-libs", version = "=0.1.0", rev = "db19c373c8d59a545972ca340987aecfb3611a4b", features = ["egui"] }
 # internal
 effectcraft-time = { path = "crates/time" }
 effectcraft-geom = { path = "crates/geom" }
