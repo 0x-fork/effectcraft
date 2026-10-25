@@ -216,9 +216,16 @@ takes a name, or as `{"Viewer":42}` and `{"ScriptPanel":77}` for viewers and Scr
   side zone docks along that edge of the whole workspace. `window.floatPanel {panel, rect?}`
   requires exactly four finite numbers when `rect` is given and otherwise floats a 420x320
   window in the middle of the app window. `window.closePanel {panel}` closes it.
-- `window.panelWindow {panel, window?}` records a floating panel's window as its own native
-  window (`window` false moves it back; without `window` it toggles). A docked panel floats
-  first. The window is drawn in the main window in this version.
+- `window.panelWindow {panel, window?}` puts a panel in a floating window of its own with a
+  desktop place over the panel's place in the main window, and returns `{"window": bool}`. A
+  docked panel floats first. `window` false docks it again, as a tab of the first docked group;
+  without `window` it toggles.
+
+On desktop every floating window is an OS window of its own (craft-ui's `native-windows`), which
+can go on another monitor; on Wayland, on the web and where egui embeds viewports, floating
+windows stay in the main window. Keys pressed in a floating window that none of its widgets uses
+run the main window's shortcuts, and files dropped on one import as on the main window. While a
+modal dialog is open, floating windows take no input.
 
 The automation ids of the docking chrome are `panel.tab.<Panel>`, `panel.drag.<Panel>` (a
 group's drag bar), `panel.tabs.more.<Panel>`, `panel.menu.<Panel>` (≡), `panel.header.<Panel>`
@@ -229,5 +236,11 @@ group's drag bar), `panel.tabs.more.<Panel>`, `panel.menu.<Panel>` (≡), `panel
 `s<i>`) and `dock.corner.<outer>.<inner>` where two dividers meet.
 
 Saved workspaces (`workspaces.json`, version 2) hold craft-ui `Workspace`s: the layout, the
-closed panels with where each goes back, and the lock. A file from an earlier version loads as
-the default layout and is left unchanged.
+closed panels with where each goes back, the lock, and each floating window's desktop place. A
+version 1 file (EffectCraft 0.10 and earlier) and the older unversioned record of
+named workspaces load with every panel in place: the current layout, the named workspaces,
+floating windows and their native window places. A stacked frame with several tabs becomes one
+stacked panel per tab, the shown one keeping the frame's open state and height. Panels that were
+closed stay closed and reopen at their default place. The first save writes version 2 and keeps
+the earlier file as `workspaces.old.json`. A damaged, unknown or newer file loads as the default
+layout and is left unchanged.
