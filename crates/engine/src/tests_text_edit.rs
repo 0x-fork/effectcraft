@@ -543,6 +543,29 @@ fn atomic_batch_rollback_after_a_cross_comp_editor_switch_bumps_the_epoch() {
 }
 
 #[test]
+fn an_atomic_batch_drops_the_events_its_failed_steps_queued() {
+    let (mut s, _) = session("abcdef");
+    let original = s.active_comp_id().unwrap();
+    // `comp.new` opens the comp it creates; go back so the batch's switch is a real one.
+    let other = new_other_comp(&mut s);
+    s.execute("comp.open", json!({"comp": original.0})).unwrap();
+    s.drain_events();
+    let r = s.execute(
+        "engine.batch",
+        json!({"atomic": true, "steps": [
+            {"command": "comp.open", "params": {"comp": other}},
+            {"command": "no.suchCommand", "params": {}}
+        ]}),
+    );
+    assert!(r.is_err());
+    assert_eq!(s.active_comp_id(), Some(original), "the batch restored the original comp");
+    assert!(
+        !s.drain_events().iter().any(|e| matches!(e, crate::Event::OpenComp(id) if id.0 == other)),
+        "the rolled-back step's OpenComp is not queued for the UI"
+    );
+}
+
+#[test]
 fn atomic_batch_rollback_after_closing_the_editor_does_not_revive_it() {
     let (mut s, t) = session("abcdef");
     let original = s.active_comp_id().unwrap();
