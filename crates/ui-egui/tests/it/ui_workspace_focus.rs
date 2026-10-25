@@ -102,18 +102,20 @@ fn unreadable_native_workspace_is_preserved_after_later_layout_changes() {
 }
 
 #[test]
-#[ignore = "D2: the migration of workspace files written with craft-libs 5c874d51"]
 fn legacy_named_workspaces_migrate_once_and_survive_actual_app_restart() {
     let store = Arc::new(MemoryConfig::default());
+    // An unversioned record from an earlier EffectCraft: its Minimal layout saved as "Legacy".
+    let legacy = r#"{"floating":{},"workspaces":{"Legacy":{"Split":{"a":{"Tabs":{"active":0,"panels":["Composition"]}},"b":{"Tabs":{"active":0,"panels":["Timeline"]}},"size":{"Ratio":0.6000000238418579},"vertical":true}}}}"#;
+    store.write("workspaces.json", legacy).unwrap();
     let saved = effectcraft_ui_egui::dock::Workspace::new(effectcraft_ui_egui::dock::workspace("Minimal"));
-    store.write("workspaces.json", &json!({"workspaces":{"Legacy":saved},"floating":{}}).to_string()).unwrap();
     let mut app = EffectcraftApp::new(Session { config: Some(store.clone()), ..Default::default() });
     assert_eq!(app.ui.saved_workspaces.get("Legacy"), Some(&saved));
     app.set_workspace("Legacy");
     let ctx = egui::Context::default();
     effectcraft_ui_egui::menus::invoke(&mut app, &ctx, "window.saveWorkspaceAs", json!({"name":"Migrated"})).unwrap();
     let text = store.read("workspaces.json").unwrap();
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap()["version"], 1);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap()["version"], 2);
+    assert_eq!(store.read("workspaces.old.json").as_deref(), Some(legacy));
     let restarted = EffectcraftApp::new(Session { config: Some(store), ..Default::default() });
     assert_eq!(restarted.ui.saved_workspaces.get("Legacy"), Some(&saved));
     assert_eq!(restarted.ui.saved_workspaces.get("Migrated"), Some(&saved));

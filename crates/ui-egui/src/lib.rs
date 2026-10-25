@@ -278,6 +278,8 @@ pub struct EffectcraftApp {
     pub(crate) control_rx: Option<Receiver<ControlRequest>>,
     pub(crate) deferred: Vec<(ControlRequest, f64)>,
     pub(crate) synthetic: Vec<egui::Event>,
+    /// Input from floating panels' own OS windows for the main window's next frame.
+    pub(crate) forwarded: ForwardedInput,
     pub(crate) input_waiters: Vec<Sender<serde_json::Value>>,
     /// Control requests waiting for an offloaded job (`wait: true` in the browser).
     pub(crate) job_waiters: Vec<(control::JobWaiter, Sender<serde_json::Value>)>,
@@ -381,6 +383,7 @@ impl EffectcraftApp {
             control_rx: None,
             deferred: vec![],
             synthetic: vec![],
+            forwarded: ForwardedInput::default(),
             input_waiters: vec![],
             job_waiters: vec![],
             queued_screenshots: vec![],
@@ -1874,6 +1877,13 @@ impl EffectcraftApp {
     }
 }
 
+/// Keys and dropped files from floating panels' OS windows (craft-ui `DockOutput`).
+#[derive(Default)]
+pub(crate) struct ForwardedInput {
+    pub(crate) events: Vec<egui::Event>,
+    pub(crate) files: Vec<egui::DroppedFileHandle>,
+}
+
 impl eframe::App for EffectcraftApp {
     fn on_exit(&mut self) {
         self.save_workspace_state();
@@ -1885,6 +1895,8 @@ impl eframe::App for EffectcraftApp {
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        raw_input.events.append(&mut self.forwarded.events);
+        raw_input.dropped_files.append(&mut self.forwarded.files);
         let injected = !self.synthetic.is_empty();
         self.feed_synthetic(raw_input);
         if pointer_wrap::prepare_input(ctx, raw_input, injected) {

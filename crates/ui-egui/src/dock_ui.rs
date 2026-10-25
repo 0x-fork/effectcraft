@@ -226,17 +226,18 @@ impl EffectcraftApp {
         pos.and_then(|p| self.dock_rects.iter().rev().find(|(_, r)| r.contains(p)).map(|(k, _)| *k)).unwrap_or(self.ui.focused)
     }
 
-    /// Whether panel `p`'s floating window is recorded as its own native window.
+    /// Whether panel `p` is in a floating window with a desktop place: its own OS window on
+    /// desktop (craft-ui `native-windows`); on the web and in embedded viewports the window
+    /// stays in the page and the place is kept for a desktop session.
     pub fn in_panel_window(&self, p: PanelKind) -> bool {
         self.ui.dock.layout.floating.iter().any(|w| w.contains(&p) && w.native.is_some())
     }
 
-    /// Move panel `p`'s floating window into its own native window, which can be placed on
-    /// another monitor, or back into the main window (`window` false). `None` toggles. A docked
-    /// panel is undocked first. The window's place is over the panel's place in the main window.
-    /// Returns whether `p` is now in a window of its own.
-    // D2: craft-ui's `native-windows` feature draws these windows; until then the place is
-    // recorded and the window is drawn in the main window.
+    /// Move panel `p` into a floating window of its own, which on desktop is an OS window that
+    /// can go on another monitor, or back into the main window (`window` false), where it joins
+    /// the first docked group. `None` toggles. A docked panel is undocked first, and its window
+    /// opens over the panel's place in the main window. Returns whether `p` is now in a window
+    /// of its own.
     pub fn set_panel_window(&mut self, ctx: &egui::Context, p: PanelKind, window: Option<bool>) -> Result<bool, String> {
         let current = self.in_panel_window(p);
         let window = window.unwrap_or(!current);
@@ -244,7 +245,21 @@ impl EffectcraftApp {
             return Ok(current);
         }
         if !window {
-            self.apply_dock(Action::SetNative { panel: p, rect: None })?;
+            // On desktop every floating window is an OS window, so the way back is docking.
+            let anchor = self.ui.dock.layout.root.as_ref().and_then(|root| {
+                let mut panels = Vec::new();
+                dock::node_panels(root, &mut panels);
+                panels.into_iter().find(|panel| *panel != p)
+            });
+            let actions = match anchor {
+                Some(anchor) => vec![Action::Move { panel: p, anchor, placement: craft_ui::docking::Placement::Tab { before: None } }],
+                // Nothing is docked: the panel becomes the docked layout.
+                None => vec![Action::Close { panel: p }, Action::Open { panel: p, anchor: None }],
+            };
+            let mut workspace = self.ui.dock.clone();
+            // One transaction, so the panel is never reported closed and keeps its state.
+            let closed = workspace.apply_all(actions, dock::permissions).map_err(|_| format!("can't dock {}", p.title()))?;
+            self.commit_workspace(workspace, &closed, true);
             return Ok(false);
         }
         if !self.ui.dock.is_floating(p) {
@@ -375,7 +390,11 @@ impl EffectcraftApp {
         }
         let style = dock_style(ui, &t);
         let maximized = self.ui.maximized.filter(|m| self.ui.dock.is_docked(*m));
-        let mut area = DockArea::new(area_id()).float_bounds(body).maximized(maximized).locked(self.ui.dock.locked);
+        let mut area = DockArea::new(area_id())
+            .float_bounds(body)
+            .maximized(maximized)
+            .locked(self.ui.dock.locked)
+            .input_blocked(self.dialog.is_some() || panels::dialogs::modal_open(&ctx));
         if let Some(panel) = self.pending_panel_raise.take() {
             area = area.raise_panel(panel);
         }
@@ -396,9 +415,10 @@ impl EffectcraftApp {
             menu: None,
             bodies: Vec::new(),
         };
-        let output = area.show_content(&mut child, &layout, &style, &mut content);
+        let mut output = area.show_content(&mut child, &layout, &style, &mut content);
         let EffectContent { doc_actions, locks, menu, bodies, .. } = content;
         self.dock_rects = bodies;
+        self.forward_window_input(&ctx, std::mem::take(&mut output.forwarded_events), std::mem::take(&mut output.window_files));
         if let Some(panel) = output.focused {
             self.focus_panel(&ctx, panel);
         }
@@ -444,6 +464,20 @@ impl EffectcraftApp {
         let hits = DockArea::<PanelKind>::hit_rects(&ctx, area_id());
         self.register_dock_hits(&hits);
         panels::panel_menu_popup(self, ui);
+    }
+
+    /// Keys and dropped files that reach a floating panel's own OS window go to the main
+    /// window's next frame ([`crate::EffectcraftApp::raw_input_hook`]), so its shortcuts and
+    /// file import handle them. Text is not forwarded, and nothing is while a text field in
+    /// the main window has the keyboard.
+    fn forward_window_input(&mut self, ctx: &egui::Context, events: Vec<egui::Event>, files: Vec<craft_ui::docking::WindowFiles<PanelKind>>) {
+        let typing = ctx.egui_wants_keyboard_input();
+        let events = events.into_iter().filter(|event| !typing && !matches!(event, egui::Event::Text(_) | egui::Event::Ime(_)));
+        self.forwarded.events.extend(events);
+        self.forwarded.files.extend(files.into_iter().flat_map(|window| window.dropped));
+        if !self.forwarded.events.is_empty() || !self.forwarded.files.is_empty() {
+            ctx.request_repaint();
+        }
     }
 
     /// Automation ids for craft-ui's gesture sources: `panel.tab.<Panel>`, `panel.drag.<Panel>`

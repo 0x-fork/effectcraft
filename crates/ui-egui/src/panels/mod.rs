@@ -234,9 +234,8 @@ pub fn panel_menu_popup(app: &mut EffectcraftApp, ui: &mut egui::Ui) {
                 let _ = app.dock_command(ui.ctx(), craft_ui::docking::Action::Float { panel, rect: r });
                 close = true;
             }
-            // Multiple monitors: a native window of its own, which can go on another screen.
-            // D2: craft-ui's native windows draw it; until then the place is recorded and the
-            // panel floats in the main window.
+            // Multiple monitors: an OS window of its own, which can go on another screen. Where
+            // egui embeds viewports (the web), floating windows stay in the page.
             if !ui.ctx().embed_viewports() {
                 let windowed = app.in_panel_window(panel);
                 if ui.button(if windowed { tr("Move Panel to Main Window") } else { tr("Move Panel to New Window") }).clicked() {

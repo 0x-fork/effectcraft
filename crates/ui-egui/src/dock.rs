@@ -410,7 +410,7 @@ pub trait WorkspaceExt {
     fn panels(&self) -> Vec<PanelKind>;
 }
 
-fn node_panels(node: &Node<PanelKind>, out: &mut Vec<PanelKind>) {
+pub(crate) fn node_panels(node: &Node<PanelKind>, out: &mut Vec<PanelKind>) {
     match node {
         Node::Split { first, second, .. } => {
             node_panels(first, out);

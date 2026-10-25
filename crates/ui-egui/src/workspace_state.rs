@@ -8,7 +8,11 @@ use serde::{Deserialize, Serialize};
 use crate::dock::{PanelKind, Workspace};
 use crate::state::UiState;
 
+mod legacy;
+
 const FILE: &str = "workspaces.json";
+/// An earlier version's file, kept when it is first rewritten in the current format.
+const BACKUP: &str = "workspaces.old.json";
 const MAX_BYTES: usize = 1024 * 1024;
 const MAX_WORKSPACES: usize = 64;
 /// Leave room for new viewers without approaching the u32 allocator limit.
@@ -94,23 +98,27 @@ pub(crate) struct WorkspaceStore {
     saved: Snapshot,
     last_attempt: f64,
     writable: bool,
+    /// The text of an earlier version's file that loaded: the first save copies it to
+    /// [`BACKUP`] and writes the file in the current format.
+    migrated_from: Option<String>,
     pub(crate) error: Option<String>,
 }
 
 impl WorkspaceStore {
     pub(crate) fn load(config: Option<&dyn ConfigStore>, ui: &mut UiState) -> Self {
+        let mut original = None;
         let loaded = config.map_or(Ok(None), |c| c.read_bounded(FILE, MAX_BYTES)).map_err(|e| e.to_string()).and_then(|text| {
             text.map(|text| {
                 let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-                // D2: migrate the version 1 snapshot (EffectCraft's own dock tree, craft-libs
-                // 5c874d51) and the unversioned `{workspaces, floating}` record here. Until then
-                // they load as an error: this session keeps the default layout and leaves the
-                // file untouched.
-                let version = value.get("version").and_then(serde_json::Value::as_u64);
-                if version.is_none_or(|v| v < u64::from(VERSION)) {
-                    return Err("this workspace file is from an earlier EffectCraft version".to_string());
-                }
-                let snapshot = serde_json::from_value::<Snapshot>(value).map_err(|e| e.to_string())?;
+                let snapshot = if legacy::is_legacy(&value) {
+                    let snapshot = legacy::migrate(value, ui)?;
+                    original = Some(text);
+                    snapshot
+                } else if value.get("version").is_none() {
+                    return Err("not a workspace file".to_string());
+                } else {
+                    serde_json::from_value::<Snapshot>(value).map_err(|e| e.to_string())?
+                };
                 snapshot.validate()?;
                 Ok(snapshot)
             })
@@ -127,10 +135,11 @@ impl WorkspaceStore {
         if let Some(error) = &error {
             log::warn!("{error}");
             ui.status = error.clone();
+            original = None;
         }
         // An unreadable or newer file is never replaced by this session, even after a later
         // layout edit. Ordinary failed writes remain dirty and retryable.
-        Self { saved: Snapshot::capture(ui), last_attempt: f64::NEG_INFINITY, writable: error.is_none(), error }
+        Self { saved: Snapshot::capture(ui), last_attempt: f64::NEG_INFINITY, writable: error.is_none(), migrated_from: original, error }
     }
 
     pub(crate) fn due(&mut self, now: f64) -> bool {
@@ -145,7 +154,8 @@ impl WorkspaceStore {
         if !self.writable {
             return false;
         }
-        self.saved.workspace != ui.workspace
+        self.migrated_from.is_some()
+            || self.saved.workspace != ui.workspace
             || self.saved.dock != ui.dock
             || self.saved.focused != ui.focused
             || self.saved.maximized != ui.maximized
@@ -163,7 +173,11 @@ impl WorkspaceStore {
         if text.len() > MAX_BYTES {
             return Err("workspace file exceeds 1 MiB".into());
         }
+        if let Some(original) = &self.migrated_from {
+            config.write(BACKUP, original).map_err(|e| format!("keep the earlier workspace file: {e}"))?;
+        }
         config.write(FILE, &text).map_err(|e| format!("save workspaces: {e}"))?;
+        self.migrated_from = None;
         self.saved = snapshot;
         self.error = None;
         Ok(true)
@@ -200,14 +214,35 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_future_or_earlier_workspace_keeps_defaults_and_original_file() {
+    fn corrupt_future_or_unknown_workspace_keeps_defaults_and_original_file() {
         let valid = Snapshot::capture(&UiState::default());
-        // An earlier version's file (EffectCraft's own dock tree) waits for its migration.
-        let earlier = r#"{"version":1,"workspace":"Default","dock":{"Tabs":{"panels":["Composition"],"active":0}},"floating":[],"focused":"Composition","maximized":null,"saved_workspaces":{},"saved_floating":{}}"#;
-        let legacy = r#"{"workspaces":{"Mine":{"Tabs":{"panels":["Composition"],"active":0}}}}"#;
-        for text in
-            ["{".into(), serde_json::to_string(&Snapshot { version: VERSION + 1, ..valid }).unwrap(), " ".repeat(MAX_BYTES + 1), earlier.into(), legacy.into()]
-        {
+        // Damaged files of the earlier version: a panel in two places, a bad split, an unknown
+        // panel, a tree deeper than craft-ui allows, a missing field.
+        let earlier = |dock: &str| {
+            format!(
+                r#"{{"version":1,"workspace":"Default","dock":{dock},"floating":[],"focused":"Composition","maximized":null,"saved_workspaces":{{}},"saved_floating":{{}}}}"#
+            )
+        };
+        let mut deep = r#"{"Tabs":{"panels":["Composition"],"active":0}}"#.to_string();
+        for _ in 0..=craft_ui::docking::MAX_DEPTH {
+            deep = format!(r#"{{"Split":{{"vertical":true,"size":{{"Ratio":0.5}},"a":{deep},"b":{{"Tabs":{{"panels":[],"active":0}}}}}}}}"#);
+        }
+        let twice =
+            r#"{"Split":{"vertical":true,"size":{"Ratio":0.5},"a":{"Tabs":{"panels":["Project"],"active":0}},"b":{"Tabs":{"panels":["Project"],"active":0}}}}"#;
+        let bad_split = r#"{"Split":{"vertical":true,"size":{"Ratio":7.0},"a":{"Tabs":{"panels":["Project"],"active":0}},"b":{"Tabs":{"panels":["Timeline"],"active":0}}}}"#;
+        for text in [
+            "{".into(),
+            "{}".into(),
+            "[1, 2]".into(),
+            serde_json::to_string(&Snapshot { version: VERSION + 1, ..valid }).unwrap(),
+            " ".repeat(MAX_BYTES + 1),
+            earlier(twice),
+            earlier(bad_split),
+            earlier(r#"{"Tabs":{"panels":["NoSuchPanel"],"active":0}}"#),
+            earlier(&deep),
+            r#"{"version":1,"workspace":"Default"}"#.into(),
+            r#"{"workspaces":{"Mine":{"Tabs":{"panels":["Composition"],"active":3}}}}"#.into(),
+        ] {
             let config = MemoryConfig::default();
             config.write(FILE, &text).unwrap();
             let mut ui = UiState::default();
@@ -220,7 +255,91 @@ mod tests {
             assert!(!store.save(Some(&config), &ui).unwrap());
             assert!(store.save_now(Some(&config), &ui).unwrap_err().contains("couldn't be loaded"));
             assert_eq!(config.read(FILE).as_deref(), Some(text.as_str()));
+            assert_eq!(config.read(BACKUP), None);
         }
+    }
+
+    /// A file written by EffectCraft 0.10 (craft-libs 5c874d51): the Default workspace with
+    /// Preview floating, Render Queue floating in its own native window, Align closed,
+    /// Effects & Presets moved into the Project group and Audio split beside the Timeline,
+    /// saved as "My Layout"; then Layer closed.
+    const V1: &str = include_str!("../tests/fixtures/workspaces-v1.json");
+
+    #[test]
+    fn version_one_file_loads_with_every_panel_in_place() {
+        let config = MemoryConfig::default();
+        config.write(FILE, V1).unwrap();
+        let mut ui = UiState::default();
+        let store = WorkspaceStore::load(Some(&config), &mut ui);
+        assert_eq!(store.error, None);
+        assert_eq!(ui.workspace, "My Layout");
+        assert_eq!(ui.focused, PanelKind::Composition);
+        use PanelKind::*;
+        let root = crate::dock::hsplit(
+            SplitSize::FixedSecond(300.0),
+            crate::dock::vsplit(
+                SplitSize::Ratio(0.56),
+                crate::dock::hsplit(SplitSize::FixedFirst(300.0), crate::dock::tabs(&[Project, EffectControls, EffectsPresets], 2), tabs(&[Composition])),
+                crate::dock::hsplit(SplitSize::Ratio(0.5), tabs(&[Timeline]), tabs(&[Audio])),
+            ),
+            crate::dock::stack(&[(Properties, true, None)]),
+        );
+        assert_eq!(ui.dock.layout.root, Some(root));
+        let floating: Vec<_> = ui.dock.layout.floating.iter().map(|w| (w.panels().copied().collect::<Vec<_>>(), w.rect, w.native)).collect();
+        assert_eq!(
+            floating,
+            [
+                (vec![Preview], [900.0, 120.0, 300.0, 260.0], None),
+                (vec![RenderQueue], [200.0, 500.0, 520.0, 240.0], Some(crate::dock_ui::sanitized_window_rect([200.0, 500.0, 520.0, 240.0]))),
+            ]
+        );
+        // Closed panels stay closed.
+        for panel in [Align, Layer] {
+            assert!(!ui.dock.is_open(panel), "{panel:?}");
+        }
+        // The named workspace still has Layer, closed only after it was saved.
+        let saved = ui.saved_workspaces.get("My Layout").unwrap();
+        assert!(saved.is_docked(Layer) && saved.is_floating(Preview) && !saved.is_open(Align));
+        assert_eq!(saved.layout.floating.iter().filter_map(|w| w.native).count(), 0);
+    }
+
+    #[test]
+    fn version_one_file_is_rewritten_once_in_the_current_format_and_kept_as_a_backup() {
+        let config = MemoryConfig::default();
+        config.write(FILE, V1).unwrap();
+        let mut ui = UiState::default();
+        let mut store = WorkspaceStore::load(Some(&config), &mut ui);
+        let migrated = Snapshot::capture(&ui);
+        assert!(store.has_changes(&ui), "the migrated layout is written without waiting for an edit");
+        assert!(store.save(Some(&config), &ui).unwrap());
+        assert_eq!(config.read(BACKUP).as_deref(), Some(V1));
+        let text = config.read(FILE).unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap()["version"], VERSION);
+        assert!(!store.has_changes(&ui));
+        let mut restored = UiState::default();
+        let reloaded = WorkspaceStore::load(Some(&config), &mut restored);
+        assert_eq!(reloaded.error, None);
+        assert!(!reloaded.has_changes(&restored));
+        assert_eq!(Snapshot::capture(&restored), migrated);
+    }
+
+    #[test]
+    fn stacked_frames_with_tabs_and_an_empty_root_migrate() {
+        let text = r#"{"version":1,"workspace":"Mine","dock":{"Tabs":{"panels":[],"active":0}},
+            "floating":[{"panels":["Project"],"active":0,"rect":[10.0,10.0,300.0,200.0]}],
+            "focused":"Project","maximized":null,
+            "saved_workspaces":{"Mine":{"Stack":{"entries":[{"panel":"Info","open":true},{"panels":["Audio","Preview"],"active":1,"open":true,"height":80.0}]}}},
+            "saved_floating":{"Gone":[{"panels":["Align"],"active":0,"rect":[0.0,0.0,100.0,100.0]}]}}"#;
+        let config = MemoryConfig::default();
+        config.write(FILE, text).unwrap();
+        let mut ui = UiState::default();
+        let store = WorkspaceStore::load(Some(&config), &mut ui);
+        assert_eq!(store.error, None);
+        assert_eq!(ui.dock.layout.root, None);
+        assert!(ui.dock.is_floating(PanelKind::Project));
+        let stack = crate::dock::stack(&[(PanelKind::Info, true, None), (PanelKind::Audio, false, None), (PanelKind::Preview, true, Some(80.0))]);
+        assert_eq!(ui.saved_workspaces.get("Mine").and_then(|w| w.layout.root.clone()), Some(stack));
+        assert_eq!(ui.saved_workspaces.len(), 1, "floating groups of no named workspace are dropped");
     }
 
     #[test]
