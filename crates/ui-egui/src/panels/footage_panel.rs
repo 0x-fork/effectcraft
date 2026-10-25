@@ -13,6 +13,11 @@ use super::panel_kit as kit;
 use crate::EffectcraftApp;
 use crate::theme::Tokens;
 
+/// The Footage panel for the item opened into it: the frame at the panel's current time (cached
+/// per item, time and session revision), a ruler with the in/out span and CTI that scrubs on click
+/// or drag, Play/Pause, set In/Out, and Ripple Insert / Overlay Edit into the active comp. A solid
+/// shows its colour, footage without video says so, and an empty panel explains how to open one.
+/// Playback and time changes run `footage.*` commands, so the panel and agents share the state.
 pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let t = app.tokens;
     let ctx = ui.ctx().clone();

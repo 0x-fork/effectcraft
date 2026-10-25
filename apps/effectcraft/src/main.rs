@@ -138,6 +138,10 @@ fn install_file_dialogs(app: &mut EffectcraftApp, ctx: &egui::Context) {
     let _ = (app, ctx);
 }
 
+/// Run the desktop app: parse arguments (`--version` exits before any file is written), install logging and the panic
+/// hook, attach the session log, scan fonts, honor the launch guard's backend choice and open the eframe window.
+/// Builds the session, loads settings, plugins, the requested project/media and the optional control server, then
+/// reports startup failure through `startup_failed`. Returns the event loop's result.
 fn main() -> eframe::Result {
     // First, so the panic hook and every start-up warning are recorded. Records go to stderr
     // and the session log; Help ▸ Enable Logging writes through this logger too, and warnings
@@ -432,6 +436,7 @@ struct Desktop {
 }
 
 impl eframe::App for Desktop {
+    /// The desktop host's logic tick: update the macOS menu bar, run the shared app tick and close the IME pass.
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         #[cfg(target_os = "macos")]
         self.menu.update(&mut self.app, ctx);

@@ -12,6 +12,7 @@ use crate::dock::{self, DockAction, DockNode, Group, Layout, PanelKind, PanelWin
 use crate::{EffectcraftApp, panels};
 use craft_ui::docking::{Action, DropTarget, resolve_drop};
 
+/// The `egui::Id` under which the panel whose tab is being dragged is stored.
 fn drag_id() -> egui::Id {
     egui::Id::unique("dock-tab-drag")
 }
@@ -161,6 +162,8 @@ impl EffectcraftApp {
         pos.and_then(|p| self.dock_rects.iter().rev().find(|(_, r)| r.contains(p)).map(|(k, _)| *k)).unwrap_or(self.ui.focused)
     }
 
+    /// Draw panel `p`'s body in `rect`: register its automation region, put the Composition Navigator above an active
+    /// viewer when a nested-comp flow exists, then call the panel's `show` and (for a viewer) the sketch overlay.
     fn panel_body(&mut self, ui: &mut egui::Ui, p: PanelKind, rect: Rect) {
         self.auto.add(&format!("panel.{}", p.id()), rect, p.title());
         let mut content = rect.shrink(1.0);
@@ -228,6 +231,9 @@ impl EffectcraftApp {
         }
     }
 
+    /// Lay out and draw the workspace in `body`: the maximized panel or the dock tree, group chrome, active bodies
+    /// and focus outline; then floating groups, their native panel windows, layout/action commands, tab drag-and-drop
+    /// and the panel menu. Draws the Home screen instead when it is showing.
     pub(crate) fn dock_area(&mut self, ui: &mut egui::Ui, body: Rect) {
         let t = self.tokens;
         let ctx = ui.ctx().clone();

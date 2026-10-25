@@ -1053,6 +1053,8 @@ fn gutter(ui: &mut egui::Ui, gap: Rect, vertical: bool, path: &str, t: &Tokens, 
     (response.delta != 0.0).then_some(response.delta)
 }
 
+/// Build the split-divider handle for `gap`: `vertical` selects the axis, `path` gives its stable id, and the theme
+/// supplies hover/drag/focus colours and the localized size label. Returns the handle for the caller to show.
 fn resize_handle(gap: Rect, vertical: bool, path: &str, t: &Tokens) -> ResizeHandle<'static> {
     let axis = if vertical { SplitAxis::Vertical } else { SplitAxis::Horizontal };
     let style = ResizeHandleStyle { hovered: t.focus.gamma_multiply(0.4), dragged: t.focus.gamma_multiply(0.9), focused: t.focus };
