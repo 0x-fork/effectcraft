@@ -7,7 +7,9 @@
 //! share one route.
 
 use crate::state::UiState;
-use craft_ui::docking::{Action, Divider, DockArea, DockCommand, DockContent, DockError, DockEvent, DockStyle, FloatSpace, Hit, ResizeEdge, UiDock};
+use craft_ui::docking::{
+    Action, Divider, DockArea, DockCommand, DockContent, DockError, DockEvent, DockStyle, FloatSpace, Floating, Hit, Node, ResizeEdge, UiDock,
+};
 use egui::{Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use serde_json::{Value, json};
 
@@ -435,6 +437,7 @@ impl EffectcraftApp {
         child.set_clip_rect(body.intersect(ui.clip_rect()));
         let docs = self.tab_docs();
         let doc_width = dock::doc_tabs_width(ui, &docs);
+        let ime = NativeIme::new(&layout.floating, &self.unpublished_viewports);
         let mut content = EffectContent {
             titles: self.tab_titles(),
             swatches: self.tab_swatches(),
@@ -446,13 +449,14 @@ impl EffectcraftApp {
             locks: Vec::new(),
             menu: None,
             bodies: Vec::new(),
-            viewports: Vec::new(),
+            ime,
         };
         let mut output = area.show_content(&mut child, &layout, &style, &mut content);
-        let EffectContent { doc_actions, locks, menu, bodies, viewports, .. } = content;
+        let EffectContent { doc_actions, locks, menu, bodies, ime, .. } = content;
         self.dock_rects = bodies;
+        self.unpublished_viewports = ime.unpublished();
         // A window that closed or docked takes its composition with it.
-        let previous = std::mem::replace(&mut self.native_viewports, viewports);
+        let previous = std::mem::replace(&mut self.native_viewports, ime.begun());
         let gone: Vec<_> = previous.into_iter().filter(|v| !self.native_viewports.contains(v)).collect();
         for viewport in gone {
             panels::viewer_text::end_viewport(self, &ctx, viewport);
@@ -637,8 +641,110 @@ struct EffectContent<'a> {
     menu: Option<(PanelKind, egui::Pos2)>,
     /// Where each panel body was drawn, in drawing order (floating windows last).
     bodies: Vec<(PanelKind, Rect)>,
-    /// The floating panels' OS windows whose pass has begun this frame.
-    viewports: Vec<egui::ViewportId>,
+    /// Where each native window's IME descriptor is set up and published.
+    ime: NativeIme,
+}
+
+/// Which body of a native floating window publishes its IME descriptor.
+///
+/// Each OS window is an egui pass of its own. `viewer_text::finish_ime` publishes what the pass's
+/// text editor recorded, and with nothing recorded it clears the composition and the preedit. A
+/// window with another group before the Viewer that published after every body would clear the
+/// preedit before the Viewer drew, and the Viewer's publication would then be a new context that
+/// interrupts the composition, every pass. So a window publishes after the body in which its
+/// editor has recorded its geometry and after its last body.
+pub(crate) struct NativeIme {
+    /// The bodies each native window draws this pass, as its layout says.
+    expected: Vec<(egui::ViewportId, usize)>,
+    /// The bodies each native window has drawn so far, in the order the windows began.
+    drawn: Vec<(egui::ViewportId, usize)>,
+    /// Windows that published this pass.
+    published: Vec<egui::ViewportId>,
+}
+
+impl NativeIme {
+    /// `unpublished` are the windows that drew last pass but never published: the layout's count
+    /// was too high for them, so they publish after every body this pass.
+    pub(crate) fn new(floating: &[Floating<PanelKind>], unpublished: &[egui::ViewportId]) -> Self {
+        let expected = floating
+            .iter()
+            .filter_map(|window| {
+                let viewport = window_viewport(window.id)?;
+                let count = if unpublished.contains(&viewport) { 0 } else { window_bodies(window) };
+                Some((viewport, count))
+            })
+            .collect();
+        Self { expected, drawn: Vec::new(), published: Vec::new() }
+    }
+
+    /// Count a body of `viewport` that starts drawing. True for the window's first body: its
+    /// pass sets up the IME before it.
+    pub(crate) fn begin_body(&mut self, viewport: egui::ViewportId) -> bool {
+        match self.drawn.iter_mut().find(|(v, _)| *v == viewport) {
+            Some((_, n)) => {
+                *n = n.saturating_add(1);
+                false
+            }
+            None => {
+                self.drawn.push((viewport, 1));
+                true
+            }
+        }
+    }
+
+    /// Whether the body of `viewport` that just drew publishes the IME descriptor: once the
+    /// window's editor has `recorded` its geometry this pass, and after the window's last body.
+    /// A window the layout does not name publishes after every body.
+    pub(crate) fn publishes(&mut self, viewport: egui::ViewportId, recorded: bool) -> bool {
+        let drawn = self.drawn.iter().find(|(v, _)| *v == viewport).map_or(0, |(_, n)| *n);
+        let expected = self.expected.iter().find(|(v, _)| *v == viewport).map_or(0, |(_, n)| *n);
+        let publishes = recorded || drawn >= expected;
+        if publishes && !self.published.contains(&viewport) {
+            self.published.push(viewport);
+        }
+        publishes
+    }
+
+    /// The native windows whose pass began.
+    pub(crate) fn begun(&self) -> Vec<egui::ViewportId> {
+        self.drawn.iter().map(|(v, _)| *v).collect()
+    }
+
+    /// The native windows that drew bodies but did not publish.
+    pub(crate) fn unpublished(&self) -> Vec<egui::ViewportId> {
+        self.drawn.iter().map(|(v, _)| *v).filter(|v| !self.published.contains(v)).collect()
+    }
+}
+
+/// The OS window craft-ui opens for the floating window `id`.
+#[cfg(not(target_arch = "wasm32"))]
+fn window_viewport(id: u64) -> Option<egui::ViewportId> {
+    Some(DockArea::<PanelKind>::window_viewport(area_id(), id))
+}
+
+/// The web keeps floating windows in the page.
+#[cfg(target_arch = "wasm32")]
+fn window_viewport(_id: u64) -> Option<egui::ViewportId> {
+    None
+}
+
+/// The panel bodies craft-ui draws in a floating window: the active panel of each group and each
+/// open stack entry. A minimized window shows its bar only.
+fn window_bodies(window: &Floating<PanelKind>) -> usize {
+    if window.minimized {
+        return 0;
+    }
+    let mut count = 0usize;
+    let mut nodes = vec![&window.root];
+    while let Some(node) = nodes.pop() {
+        match node {
+            Node::Split { first, second, .. } => nodes.extend([&**first, &**second]),
+            Node::Tabs { panels, active } => count = count.saturating_add(usize::from(panels.get(*active).is_some())),
+            Node::Stack { entries } => count = count.saturating_add(entries.iter().filter(|e| e.open).count()),
+            _ => {}
+        }
+    }
+    count
 }
 
 impl EffectContent<'_> {
@@ -655,15 +761,15 @@ impl DockContent<PanelKind> for EffectContent<'_> {
         let rect = ui.max_rect();
         self.bodies.push((*panel, rect));
         // A floating panel's OS window is a pass of its own: its text IME descriptor is set up
-        // before its body draws and published after (the main window does both in `draw`).
+        // before its first body and published after its bodies (the main window does both in
+        // `draw`).
         let viewport = ui.ctx().viewport_id();
         let native = viewport != egui::ViewportId::ROOT && !ui.ctx().embed_viewports();
-        if native && !self.viewports.contains(&viewport) {
-            self.viewports.push(viewport);
+        if native && self.ime.begin_body(viewport) {
             panels::viewer_text::begin_ui(ui.ctx());
         }
         self.app.panel_body(ui, *panel, rect);
-        if native {
+        if native && self.ime.publishes(viewport, panels::viewer_text::ime_recorded(ui.ctx())) {
             panels::viewer_text::finish_ime(self.app, ui);
         }
         // The body fills its frame; allocating it lets a floated panel keep its full size.

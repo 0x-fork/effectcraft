@@ -509,6 +509,8 @@ pub struct EffectcraftApp {
     /// The floating panels' OS windows that drew a panel last frame; one that is gone releases
     /// its IME state.
     pub(crate) native_viewports: Vec<egui::ViewportId>,
+    /// The native windows that drew a panel last frame without publishing their IME descriptor.
+    pub(crate) unpublished_viewports: Vec<egui::ViewportId>,
     /// A floating panel shown by a command: its window comes to the front next frame.
     pub(crate) pending_panel_raise: Option<PanelKind>,
     /// Home screen: recent-project thumbnail textures by path (None = no thumbnail).
@@ -625,6 +627,7 @@ impl EffectcraftApp {
             recovery: None,
             dock_rects: vec![],
             native_viewports: vec![],
+            unpublished_viewports: vec![],
             pending_panel_raise: None,
             home_thumbs: Default::default(),
             home_thumb_saved: None,
