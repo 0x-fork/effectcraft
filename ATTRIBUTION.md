@@ -1,19 +1,28 @@
 # Attribution
 
-Every non-code asset in EffectCraft, with its author, source and licence. Each file listed here also has
+Every non-code asset in EffectCraft, with its author, source and licence. Each repository file listed here also has
 a `<file>.attribution` sidecar with full details. The rules are in [AGENTS.md](AGENTS.md) §1: no Adobe
 iconography, images or other Adobe assets; open licences only; every asset attributed.
 `cargo xtask assets` checks that this index and the sidecars cover every asset in the repository.
+The complete licence texts and copyright notices for the bundled fonts, including the fonts embedded
+by the pinned egui dependency, are reproduced in [`NOTICE`](NOTICE), which every package ships; the
+`assets/fonts/OFL-*.txt` files are the upstream copies kept beside the fonts.
 
-## Bundled egui font icons
+## Bundled dependency fonts
 
-These dependency fonts are embedded by the pinned egui font definitions; no font file is added
-here. The subset uses default_fonts; the parent face uses monochrome_emoji_fonts.
+These fonts are embedded by the pinned egui dependency (epaint_default_fonts 0.37 at
+`6d518fc799681571963842f95b55a6b68431b15a`); no font file is added to this repository.
+egui-icons is always embedded, `default_fonts` adds Ubuntu Light and Hack, and
+`monochrome_emoji_fonts` adds Noto Emoji and emoji-icon-font. The complete copyright notices
+and licence texts are in [`NOTICE`](NOTICE).
 
 | Asset | Author | Source | Licence |
 |---|---|---|---|
-| `epaint_default_fonts/fonts/egui-icons.ttf` | John Slegers (emoji-icon-font) | https://github.com/storytold/egui/blob/173cc7375d35dc5fbc5b5d0994fdf787f547c5d1/crates/epaint_default_fonts/fonts/egui-icons.txt; original https://github.com/jslegers/emoji-icon-font | MIT (complete copyright and permission text in NOTICE) |
-| `epaint_default_fonts/fonts/emoji-icon-font.ttf` | John Slegers | https://github.com/storytold/egui/blob/173cc7375d35dc5fbc5b5d0994fdf787f547c5d1/crates/epaint_default_fonts/fonts/emoji-icon-font-mit-license.txt; original https://github.com/jslegers/emoji-icon-font | MIT (complete copyright and permission text in NOTICE) |
+| `epaint_default_fonts/fonts/egui-icons.ttf` | John Slegers (emoji-icon-font) | https://github.com/storytold/egui/blob/6d518fc799681571963842f95b55a6b68431b15a/crates/epaint_default_fonts/fonts/egui-icons.txt; original https://github.com/jslegers/emoji-icon-font | MIT (complete copyright and permission text in `NOTICE`) |
+| `epaint_default_fonts/fonts/emoji-icon-font.ttf` | John Slegers | https://github.com/storytold/egui/blob/6d518fc799681571963842f95b55a6b68431b15a/crates/epaint_default_fonts/fonts/emoji-icon-font-mit-license.txt; original https://github.com/jslegers/emoji-icon-font | MIT (complete copyright and permission text in `NOTICE`) |
+| `epaint_default_fonts/fonts/NotoEmoji-Regular.ttf` | Google Inc. (The Noto Project Authors) | https://github.com/storytold/egui/blob/6d518fc799681571963842f95b55a6b68431b15a/crates/epaint_default_fonts/fonts/OFL.txt | OFL-1.1 (complete text in `NOTICE`) |
+| `epaint_default_fonts/fonts/Ubuntu-Light.ttf` | Canonical Ltd. and Dalton Maag | https://github.com/storytold/egui/blob/6d518fc799681571963842f95b55a6b68431b15a/crates/epaint_default_fonts/fonts/UFL.txt | Ubuntu Font Licence 1.0 (complete text in `NOTICE`) |
+| `epaint_default_fonts/fonts/Hack-Regular.ttf` | Source Foundry Authors; Bitstream Inc. | https://github.com/storytold/egui/blob/6d518fc799681571963842f95b55a6b68431b15a/crates/epaint_default_fonts/fonts/Hack-Regular.txt; original https://github.com/source-foundry/Hack | MIT AND Bitstream-Vera (complete texts in `NOTICE`) |
 
 ## Asset files
 
