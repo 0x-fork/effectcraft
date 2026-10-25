@@ -556,7 +556,7 @@ pub fn doc_tabs(ui: &mut egui::Ui, strip: Rect, docs: &[DocTab], t: &Tokens, reg
             break;
         }
         let tab = Rect::from_min_size(pos2(x, strip.min.y), vec2(w, strip.height()));
-        let resp = ui.interact(tab, egui::Id::new(("comp-tab", doc.id)), Sense::click());
+        let resp = ui.interact(tab, egui::Id::unique(("comp-tab", doc.id)), Sense::click());
         reg.add_response(&format!("panel.tab.{}.{}", PanelKind::Timeline.id(), doc.id), &resp, &doc.title);
         if doc.active {
             painter.rect_filled(tab, 0.0, t.panel_bg);
@@ -571,7 +571,7 @@ pub fn doc_tabs(ui: &mut egui::Ui, strip: Rect, docs: &[DocTab], t: &Tokens, reg
         if doc.active {
             painter.line_segment([pos2(label_x, strip.max.y - 3.0), pos2(label_x + label_w, strip.max.y - 3.0)], Stroke::new(1.0, t.tab_text_active));
             let cr = Rect::from_center_size(pos2(label_x + label_w + DOC_CLOSE / 2.0 + 2.0, mid), vec2(10.0, 10.0));
-            let close = ui.interact(cr.expand(2.0), egui::Id::new(("comp-tab-close", doc.id)), Sense::click());
+            let close = ui.interact(cr.expand(2.0), egui::Id::unique(("comp-tab-close", doc.id)), Sense::click());
             let cc = if close.hovered() { t.tab_text_active } else { t.tab_text };
             let k = 3.5;
             painter.line_segment([cr.center() + vec2(-k, -k), cr.center() + vec2(k, k)], Stroke::new(1.2, cc));
@@ -597,7 +597,7 @@ pub fn doc_tabs(ui: &mut egui::Ui, strip: Rect, docs: &[DocTab], t: &Tokens, reg
 /// A viewer lock button (Composition viewers and the Timeline keep their comp while locked).
 /// Returns true when clicked. Automation: `panel.tab.<panel>.lock`.
 pub fn lock_button(ui: &mut egui::Ui, rect: Rect, panel: PanelKind, locked: bool, t: &Tokens, reg: &mut crate::automation::Registry) -> bool {
-    let resp = ui.interact(rect, egui::Id::new(("tab-lock", panel.id())), Sense::click());
+    let resp = ui.interact(rect, egui::Id::unique(("tab-lock", panel.id())), Sense::click());
     let color = if locked {
         t.tab_text_active
     } else if resp.hovered() {

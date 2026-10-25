@@ -213,6 +213,7 @@ fn main() -> eframe::Result {
         "EffectCraft",
         options,
         Box::new(move |cc| {
+            EffectcraftApp::install_ime_reset_hooks(&cc.egui_ctx);
             match &cc.wgpu_render_state {
                 Some(rs) => log::info!("graphics: {:?}", rs.adapter.get_info()),
                 None => log::info!("graphics: no wgpu device"),
@@ -447,7 +448,8 @@ impl eframe::App for Desktop {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         #[cfg(target_os = "macos")]
         self.menu.update(&mut self.app, ctx);
-        self.app.logic(ctx, frame);
+        self.app.tick(ctx, frame);
+        self.app.finish_ime_logic(ctx);
         if let Some(asked) = &self.file_dialogs {
             sheet_dialogs::show_asked(asked, frame, ctx);
         }

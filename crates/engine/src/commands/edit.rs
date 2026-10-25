@@ -227,6 +227,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         st.selected_keys.clear();
         Ok(())
     })?;
+    // A removed layer may have been the edited one: end that session before another command
+    // can reuse it. Undo restores a layer as a new editor, never by reviving the old IME session.
+    s.sanitize_state();
     Ok(json!(ids.len()))
 }
 

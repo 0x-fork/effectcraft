@@ -18,7 +18,7 @@ use crate::{EffectcraftApp, panels};
 
 /// The dock area's egui id; `DockArea::hit_rects` and `float_space` read by it.
 pub fn area_id() -> egui::Id {
-    egui::Id::new("effectcraft-docking")
+    egui::Id::unique("effectcraft-docking")
 }
 
 /// Width of the ≡ panel menu button at the end of each tab strip.
@@ -446,10 +446,17 @@ impl EffectcraftApp {
             locks: Vec::new(),
             menu: None,
             bodies: Vec::new(),
+            viewports: Vec::new(),
         };
         let mut output = area.show_content(&mut child, &layout, &style, &mut content);
-        let EffectContent { doc_actions, locks, menu, bodies, .. } = content;
+        let EffectContent { doc_actions, locks, menu, bodies, viewports, .. } = content;
         self.dock_rects = bodies;
+        // A window that closed or docked takes its composition with it.
+        let previous = std::mem::replace(&mut self.native_viewports, viewports);
+        let gone: Vec<_> = previous.into_iter().filter(|v| !self.native_viewports.contains(v)).collect();
+        for viewport in gone {
+            panels::viewer_text::end_viewport(self, &ctx, viewport);
+        }
         self.forward_window_input(&ctx, std::mem::take(&mut output.forwarded_events), std::mem::take(&mut output.window_files));
         if let Some(panel) = output.focused {
             self.focus_panel(&ctx, panel);
@@ -491,7 +498,7 @@ impl EffectcraftApp {
             }
         }
         if let Some((panel, pos)) = menu {
-            ctx.data_mut(|d| d.insert_temp(egui::Id::new("panel-menu"), (panel, pos)));
+            ctx.data_mut(|d| d.insert_temp(egui::Id::unique("panel-menu"), (panel, pos)));
         }
         let hits = DockArea::<PanelKind>::hit_rects(&ctx, area_id());
         self.register_dock_hits(&hits);
@@ -630,6 +637,8 @@ struct EffectContent<'a> {
     menu: Option<(PanelKind, egui::Pos2)>,
     /// Where each panel body was drawn, in drawing order (floating windows last).
     bodies: Vec<(PanelKind, Rect)>,
+    /// The floating panels' OS windows whose pass has begun this frame.
+    viewports: Vec<egui::ViewportId>,
 }
 
 impl EffectContent<'_> {
@@ -645,7 +654,18 @@ impl DockContent<PanelKind> for EffectContent<'_> {
         let t = self.tokens;
         let rect = ui.max_rect();
         self.bodies.push((*panel, rect));
+        // A floating panel's OS window is a pass of its own: its text IME descriptor is set up
+        // before its body draws and published after (the main window does both in `draw`).
+        let viewport = ui.ctx().viewport_id();
+        let native = viewport != egui::ViewportId::ROOT && !ui.ctx().embed_viewports();
+        if native && !self.viewports.contains(&viewport) {
+            self.viewports.push(viewport);
+            panels::viewer_text::begin_ui(ui.ctx());
+        }
         self.app.panel_body(ui, *panel, rect);
+        if native {
+            panels::viewer_text::finish_ime(self.app, ui);
+        }
         // The body fills its frame; allocating it lets a floated panel keep its full size.
         ui.allocate_rect(rect, Sense::hover());
         // Painted after the body so child backgrounds cannot hide the focus outline.
@@ -693,8 +713,8 @@ impl DockContent<PanelKind> for EffectContent<'_> {
             self.doc_actions.extend(dock::doc_tabs(ui, strip, &self.docs, &t, &mut self.app.auto));
         }
         let rect = Rect::from_center_size(menu.center(), vec2(18.0, 18.0));
-        let response = ui.interact(rect, egui::Id::new(("panel-menu-button", active.id())), Sense::click());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), "panel menu"));
+        let response = ui.interact(rect, egui::Id::unique(("panel-menu-button", active.id())), Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, response.enabled(), "panel menu"));
         self.app.auto.add_response(&format!("panel.menu.{}", active.id()), &response, "panel menu");
         let color = if response.hovered() { t.tab_text_active } else { t.tab_text };
         icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(16.0, 16.0)), Icon::Hamburger, color);
