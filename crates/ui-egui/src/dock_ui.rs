@@ -402,6 +402,14 @@ impl EffectcraftApp {
         }
     }
 
+    /// Whether floating panels' OS windows take no input: a dialog of the app's own or a
+    /// command's OS file dialog is up. egui's `Modal` blocks only the window it is in.
+    pub(crate) fn floats_blocked(&mut self, ctx: &egui::Context) -> bool {
+        let (focused, now) = ctx.input(|i| (i.focused || i.raw.viewports.values().any(|v| v.focused == Some(true)), i.time));
+        let file_dialog = self.file_dialogs.up(focused, now);
+        self.dialog.is_some() || panels::dialogs::modal_open(ctx) || file_dialog
+    }
+
     pub(crate) fn dock_area(&mut self, ui: &mut egui::Ui, body: Rect) {
         let t = self.tokens;
         let ctx = ui.ctx().clone();
@@ -418,11 +426,7 @@ impl EffectcraftApp {
         }
         let style = dock_style(ui, &t);
         let maximized = self.ui.maximized.filter(|m| self.ui.dock.is_docked(*m));
-        let mut area = DockArea::new(area_id())
-            .float_bounds(body)
-            .maximized(maximized)
-            .locked(self.ui.dock.locked)
-            .input_blocked(self.dialog.is_some() || panels::dialogs::modal_open(&ctx));
+        let mut area = DockArea::new(area_id()).float_bounds(body).maximized(maximized).locked(self.ui.dock.locked).input_blocked(self.floats_blocked(&ctx));
         if let Some(panel) = self.pending_panel_raise.take() {
             area = area.raise_panel(panel);
         }

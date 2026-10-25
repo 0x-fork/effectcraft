@@ -319,6 +319,8 @@ pub struct EffectcraftApp {
     device_lost_close: Option<bool>,
     /// Answers of file dialogs shown without blocking ([`Hooks::file_dialog_async`]).
     pub(crate) dialog_answers: (Sender<DialogAnswer>, Receiver<DialogAnswer>),
+    /// Those dialogs that are up, for blocking floating panels' OS windows meanwhile.
+    pub(crate) file_dialogs: FileDialogsUp,
     /// Commands from the native menu bar.
     pub command_inbox: Option<Receiver<String>>,
     /// Pointer position in comp pixels (Info panel).
@@ -406,6 +408,7 @@ impl EffectcraftApp {
             gpu_failure_applied: None,
             device_lost_close: None,
             dialog_answers: std::sync::mpsc::channel(),
+            file_dialogs: FileDialogsUp::default(),
             command_inbox: None,
             pointer_comp: None,
             dialog_state: Default::default(),
@@ -768,6 +771,7 @@ impl EffectcraftApp {
     /// Run the commands whose non-blocking file dialogs have been answered.
     pub(crate) fn run_dialog_answers(&mut self) {
         while let Ok(answer) = self.dialog_answers.1.try_recv() {
+            self.file_dialogs.answered();
             menus::dialog_answered(self, answer);
         }
     }
@@ -1874,6 +1878,55 @@ impl EffectcraftApp {
     /// [`eframe::App::raw_input_hook`] (the headless test harness) feed these in themselves.
     pub fn take_synthetic_input(&mut self) -> Vec<egui::Event> {
         std::mem::take(&mut self.synthetic)
+    }
+}
+
+/// Non-blocking file dialogs ([`Hooks::file_dialog_async`]) that are up. While one is, the dock
+/// area blocks floating panels' OS windows, as it does for a modal dialog; otherwise craft-ui
+/// takes the app for inactive while the dialog has the keyboard, and hides floating palettes.
+///
+/// A dialog can end without answering: on macOS a sheet whose window goes away ends without its
+/// completion handler. A dialog is taken for gone, so floating windows never stay blocked, once
+/// one of the app's windows has the keyboard again after none had it, or when one has kept it
+/// for [`FileDialogsUp::UNSEEN`] since the dialog was asked for, so the dialog never showed.
+#[derive(Default)]
+pub(crate) struct FileDialogsUp {
+    count: usize,
+    /// When the oldest dialog up was first checked ([`FileDialogsUp::up`]).
+    since: Option<f64>,
+    /// None of the app's windows had the keyboard since then.
+    left: bool,
+}
+
+impl FileDialogsUp {
+    /// Seconds a dialog has to take the keyboard from the app's windows. The desktop portal can
+    /// take a moment to show the first dialog on Linux.
+    const UNSEEN: f64 = 2.0;
+
+    pub(crate) fn opened(&mut self) {
+        if self.count == 0 {
+            *self = Self::default();
+        }
+        self.count = self.count.saturating_add(1);
+    }
+
+    pub(crate) fn answered(&mut self) {
+        self.count = self.count.saturating_sub(1);
+    }
+
+    /// Whether a dialog is up at `now`, `focused`: whether one of the app's windows has the
+    /// keyboard.
+    pub(crate) fn up(&mut self, focused: bool, now: f64) -> bool {
+        if self.count == 0 {
+            return false;
+        }
+        let since = *self.since.get_or_insert(now);
+        if !focused {
+            self.left = true;
+        } else if self.left || now - since >= Self::UNSEEN {
+            *self = Self::default();
+        }
+        self.count > 0
     }
 }
 

@@ -1415,6 +1415,7 @@ fn file_dialog(app: &mut EffectcraftApp, id: &str, params: &Value) -> Option<Res
         };
         let tx = app.dialog_answers.0.clone();
         let answer = crate::DialogAnswer { command: id.to_string(), key, params: params.clone(), paths: Vec::new() };
+        app.file_dialogs.opened();
         spawn(
             request,
             Box::new(move |paths| {
@@ -2666,6 +2667,56 @@ mod tests {
         app.run_dialog_answers();
         assert!(!dir.join("Frame.png").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// While a command's OS file dialog is up, floating panels' OS windows are blocked, as for
+    /// a modal dialog; a dialog that ends, answered or not, unblocks them, and Save As opens a
+    /// dialog again. A macOS sheet can end without answering (its window went away): once one of
+    /// the app's windows has the keyboard again, or keeps it as if no dialog showed, floating
+    /// windows are not left blocked.
+    #[test]
+    fn file_dialogs_block_floating_windows_only_while_up() {
+        use std::sync::{Arc, Mutex};
+        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
+        let ctx = egui::Context::default();
+        let pending: Arc<Mutex<Vec<crate::DialogDone>>> = Arc::default();
+        let queue = pending.clone();
+        app.hooks.file_dialog_async = Some(Box::new(move |_dialog, done| queue.lock().unwrap().push(done)));
+        let blocked = |app: &mut EffectcraftApp, focused: bool, time: f64| {
+            let input = egui::RawInput { focused, time: Some(time), ..Default::default() };
+            let mut out = false;
+            ctx.run_ui(input, |ui| out = app.floats_blocked(ui.ctx())).textures_delta.clear();
+            out
+        };
+        assert!(!blocked(&mut app, true, 0.0));
+        // Cancelled.
+        invoke(&mut app, &ctx, "file.saveAs", json!({})).unwrap();
+        assert!(blocked(&mut app, true, 0.1), "blocked while the dialog takes the keyboard");
+        assert!(blocked(&mut app, false, 0.2));
+        let done = pending.lock().unwrap().pop().expect("a dialog was shown");
+        done(Vec::new());
+        app.run_dialog_answers();
+        assert!(!blocked(&mut app, false, 0.3));
+        // Save As asks again; the sheet ends without answering.
+        invoke(&mut app, &ctx, "file.saveAs", json!({})).unwrap();
+        assert_eq!(pending.lock().unwrap().len(), 1, "Save As opens a dialog again");
+        assert!(blocked(&mut app, true, 1.0));
+        assert!(blocked(&mut app, false, 1.1));
+        assert!(blocked(&mut app, false, 9.0), "a dialog may stay up for long");
+        assert!(!blocked(&mut app, true, 9.1), "an app window has the keyboard again");
+        // A dialog that never takes the keyboard.
+        invoke(&mut app, &ctx, "file.saveAs", json!({})).unwrap();
+        assert!(blocked(&mut app, true, 10.0));
+        assert!(blocked(&mut app, true, 11.0));
+        assert!(!blocked(&mut app, true, 12.5));
+        // Answers of dialogs taken for gone arrive late: nothing stays blocked.
+        for done in pending.lock().unwrap().drain(..) {
+            done(Vec::new());
+        }
+        app.run_dialog_answers();
+        assert!(!blocked(&mut app, false, 13.0));
+        invoke(&mut app, &ctx, "file.saveAs", json!({})).unwrap();
+        assert!(blocked(&mut app, false, 13.1), "a later dialog blocks again");
     }
 
     #[test]
