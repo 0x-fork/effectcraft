@@ -933,6 +933,10 @@ pub fn frontend(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, p: Valu
             ctx.copy_text(path.to_string());
             json!({"path": path})
         }
+        "app.checkForUpdates" | "help.checkForUpdates" => {
+            crate::updates_ui::check(app);
+            Value::Null
+        }
         "app.about" => {
             app.dialog = Some(crate::Dialog::About);
             Value::Null
