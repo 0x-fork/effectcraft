@@ -15,7 +15,7 @@
 //! - `ui.viewer.locate {x, y}`: screen point of a comp pixel; `ui.viewer.hit {x, y}`: comp pixel at a screen point
 //! - `ui.timeline.locate {layer, time?}`: screen point of a layer bar (at a comp time)
 //! - `ui.playback {action: play|stop|toggle}`
-//! - `ui.screenshot {path?, panel?, id?}`: PNG of the window (or one panel / element)
+//! - `ui.screenshot {path?, panel?, id?}`: PNG of the window (or one panel / element, resolved when the capture is issued)
 //! - `render.frame {comp?, time?, max_side?, path?, base64?}`: PNG of a comp frame rendered by the session
 //! - `ui.resize {width, height}` / `ui.focus` / `app.quit {force?}` (a modified project asks to save first unless `force`)
 //!
@@ -53,7 +53,8 @@ pub enum Outcome {
     AfterInput,
     Screenshot {
         path: Option<String>,
-        crop: Option<[f32; 4]>,
+        /// The panel/element identity to capture, resolved again when the capture is issued.
+        target: crate::ShotTarget,
     },
     /// Reply once background jobs end (a `wait: true` command whose job runs in a worker).
     AwaitJobs(JobWaiter),
@@ -169,7 +170,7 @@ fn point(app: &EffectcraftApp, p: &Value) -> Result<egui::Pos2, String> {
     Ok(egui::pos2(x as f32, y as f32))
 }
 
-pub fn handle(app: &mut EffectcraftApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
+pub fn handle(app: &mut EffectcraftApp, ctx: &egui::Context, req: &ControlRequest, now: f64) -> Outcome {
     let p = &req.params;
     let s = |k: &str| p.get(k).and_then(Value::as_str);
     match req.method.as_str() {
@@ -402,6 +403,7 @@ pub fn handle(app: &mut EffectcraftApp, ctx: &egui::Context, req: &ControlReques
                 delta: egui::vec2(dx, dy),
                 modifiers: modifiers(p),
                 phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Wheel,
             });
             app.synthetic.push(egui::Event::PointerButton {
                 pos: egui::pos2(-100.0, -100.0),
@@ -454,7 +456,6 @@ pub fn handle(app: &mut EffectcraftApp, ctx: &egui::Context, req: &ControlReques
             }
         }
         "ui.playback" => {
-            let now = ctx.input(|i| i.time);
             match s("action").unwrap_or("toggle") {
                 "play" => app.play(now),
                 "stop" => app.stop(),
@@ -466,11 +467,33 @@ pub fn handle(app: &mut EffectcraftApp, ctx: &egui::Context, req: &ControlReques
             )
         }
         "ui.screenshot" => {
-            let crop = s("panel").and_then(PanelKind::from_name).and_then(|pk| app.auto.find(&format!("panel.{}", pk.id())).map(|e| e.rect));
-            let crop = crop.or_else(|| s("id").and_then(|id| app.auto.find(id).map(|e| e.rect)));
+            // The panel/element is an identity, not a rectangle: it is resolved when the capture
+            // is issued (after the UI settles), so a panel that moves meanwhile is not cropped
+            // with its old rectangle.
+            let target = match s("panel") {
+                Some(name) => match PanelKind::from_name(name) {
+                    Some(pk) => crate::ShotTarget::Panel(pk),
+                    None => return err(format!("unknown panel `{name}`")),
+                },
+                None => s("id").map_or(crate::ShotTarget::Window, |id| crate::ShotTarget::Id(id.to_string())),
+            };
+            // Asking for one element and silently capturing the whole window would hide a missing
+            // panel: wait for it like any other not-yet-laid-out control.
+            let missing = match &target {
+                crate::ShotTarget::Panel(pk) => app.auto.find(&format!("panel.{}", pk.id())).is_none(),
+                crate::ShotTarget::Id(id) => app.auto.find(id).is_none(),
+                crate::ShotTarget::Window | crate::ShotTarget::Rect(_) => false,
+            };
+            if missing {
+                return Outcome::Retry(match &target {
+                    crate::ShotTarget::Panel(pk) => format!("the {} panel is not on screen", pk.title()),
+                    crate::ShotTarget::Id(id) => format!("no element `{id}` is on screen"),
+                    crate::ShotTarget::Window | crate::ShotTarget::Rect(_) => "the element is not on screen".into(),
+                });
+            }
             // Bring the window on screen so a frame is presented, without taking keyboard focus.
             app.raise_for_control(ctx);
-            Outcome::Screenshot { path: s("path").map(str::to_string), crop }
+            Outcome::Screenshot { path: s("path").map(str::to_string), target }
         }
         "render.frame" => render_frame(app, p),
         "ui.resize" => {
@@ -555,7 +578,8 @@ pub fn base64(data: &[u8]) -> String {
 }
 
 pub fn inspect(app: &EffectcraftApp, ctx: &egui::Context) -> Value {
-    let size = ctx.content_rect().size();
+    // A logic-only tick refreshes the viewport information but not `InputState`'s screen rect.
+    let size = ctx.input(|i| i.viewport().inner_rect).map_or_else(|| ctx.content_rect().size(), |r| r.size());
     let keyboard_focus = ctx.memory(|m| m.focused()).map(|id| {
         let response = ctx.read_response(id);
         let rect = response.as_ref().map(|r| [r.rect.min.x, r.rect.min.y, r.rect.width(), r.rect.height()]);
@@ -588,7 +612,9 @@ pub fn inspect(app: &EffectcraftApp, ctx: &egui::Context) -> Value {
         "selectedKeys": app.session.state.selected_keys.len(),
         "elements": app.auto.previous.len(),
         "keyboardFocus": keyboard_focus,
-        "windowFocused": ctx.input(|i| i.focused),
+        // Fresh viewport focus only: in a logic-only tick `InputState::focused` still holds the
+        // previous full pass's value, and the app field is that same fresh value.
+        "windowFocused": ctx.input(|i| i.viewport().focused).unwrap_or(app.focused),
         "workspaceStorageError": app.workspace_store.error,
         "dialog": app.dialog.map(|d| format!("{d:?}")),
         "renderMs": app.frames.last_ms.lock().map(|v| *v).unwrap_or(0.0),
@@ -596,21 +622,37 @@ pub fn inspect(app: &EffectcraftApp, ctx: &egui::Context) -> Value {
 }
 
 /// Save a screenshot (optionally cropped to a rect in points) as PNG; returns the reply JSON.
-pub fn save_screenshot(ctx: &egui::Context, image: &egui::ColorImage, path: Option<&str>, crop: Option<[f32; 4]>) -> Value {
-    let ppp = ctx.pixels_per_point();
+///
+/// `crop` is relative to the image's own origin (the issued surface's top-left corner), and
+/// `scale` is the returned image's pixels per point in x and y, derived from the image size and
+/// the issued rect. The image can be smaller than requested when the adapter-limit fit (E2)
+/// applies, so its own scale — never the issued or current pixels-per-point — cuts the crop:
+/// any other scale reads a shifted or rescaled region.
+pub fn save_screenshot(image: &egui::ColorImage, path: Option<&str>, crop: Option<[f32; 4]>, scale: [f64; 2]) -> Value {
     let [w, h] = image.size;
+    let [sx, sy] = scale;
+    if w == 0 || h == 0 || !sx.is_finite() || sx <= 0.0 || !sy.is_finite() || sy <= 0.0 {
+        return json!({"ok": false, "error": "the screenshot has no pixels to save"});
+    }
+    if image.pixels.len() != w.saturating_mul(h) {
+        return json!({"ok": false, "error": "the screenshot's pixels do not match its dimensions"});
+    }
+    let px = |v: f64, s: f64| (v * s).max(0.0) as usize;
     let (x0, y0, cw, ch) = match crop {
-        Some([x, y, cw, ch]) => {
-            let x0 = ((x * ppp) as usize).min(w);
-            let y0 = ((y * ppp) as usize).min(h);
-            (x0, y0, ((cw * ppp) as usize).min(w - x0), ((ch * ppp) as usize).min(h - y0))
+        Some([x, y, cw, ch]) if [x, y, cw, ch].iter().all(|v| v.is_finite()) => {
+            let x0 = px(x as f64, sx).min(w);
+            let y0 = px(y as f64, sy).min(h);
+            (x0, y0, px(cw as f64, sx).min(w - x0), px(ch as f64, sy).min(h - y0))
         }
+        Some(_) => return json!({"ok": false, "error": "the screenshot crop is not a finite rectangle"}),
         None => (0, 0, w, h),
     };
-    let mut rgba = Vec::with_capacity(cw * ch * 4);
+    let mut rgba = Vec::with_capacity(cw.saturating_mul(ch).saturating_mul(4));
     for y in y0..y0 + ch {
         for x in x0..x0 + cw {
-            let c = image.pixels[y * w + x];
+            let Some(c) = image.pixels.get(y * w + x) else {
+                return json!({"ok": false, "error": "the screenshot's pixels do not match its dimensions"});
+            };
             rgba.extend_from_slice(&[c.r(), c.g(), c.b(), 255]);
         }
     }

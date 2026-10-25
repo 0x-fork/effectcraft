@@ -200,7 +200,14 @@ fn new_text(s: &mut Session, p: &Value) -> Result<Value> {
         let n = doc.char_len();
         let id = insert_layer(proj, st, cid, l)?;
         if edit {
-            st.text_edit = Some(super::text_edit::TextEdit { layer: id, anchor: 0, caret: n, created: true, ..Default::default() });
+            st.text_edit = Some(super::text_edit::TextEdit {
+                layer: id,
+                anchor: 0,
+                caret: n,
+                created: true,
+                session: super::text_edit::next_edit_session(),
+                ..Default::default()
+            });
         }
         Ok(id)
     })?;
@@ -1474,6 +1481,7 @@ fn set_text(s: &mut Session, p: &Value) -> Result<Value> {
         }
         s.bump();
     }
+    let replacing_text = p.get("text").is_some() && s.state.text_edit.as_ref().is_some_and(|e| e.layer == lid);
     s.edit("Edit Text", merge_p(p), |proj, _| {
         let l = layer_mut(proj, cid, lid)?;
         let lt = l.layer_time(t);
@@ -1494,6 +1502,9 @@ fn set_text(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(())
     })?;
+    if replacing_text {
+        super::text_edit::invalidate_session(s);
+    }
     Ok(Value::Null)
 }
 

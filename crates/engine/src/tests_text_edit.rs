@@ -6,7 +6,7 @@ use effectcraft_keyframe::{BaselineOption, Justify, Kerning, TextDoc};
 use serde_json::json;
 
 use crate::Session;
-use crate::commands::text_edit::layer_doc;
+use crate::commands::text_edit::{MAX_IME_TEXT_BYTES, ime_surrounding, layer_doc};
 
 fn session(text: &str) -> (Session, u64) {
     let mut s = Session::default();
@@ -200,7 +200,48 @@ fn edit_state_round_trips_through_serde() {
     s.execute("text.edit", json!({"layer": t, "select": [1, 2]})).unwrap();
     let j = serde_json::to_value(&s.state).unwrap();
     let back: crate::EditorState = serde_json::from_value(j).unwrap();
-    assert_eq!(back.text_edit, s.state.text_edit);
+    let before = s.state.text_edit.clone().expect("editing");
+    let after = back.text_edit.clone().expect("editing");
+    assert_eq!((after.layer, after.anchor, after.caret), (before.layer, before.anchor, before.caret));
+    assert_ne!(after.session, before.session, "a restored editor gets a process-unique replacement epoch");
+    assert_ne!(after.session, 0, "the restored epoch is always a real session token");
+}
+
+#[test]
+fn ime_session_epoch_tracks_replaced_text_and_layer_restoration() {
+    let (mut s, t) = session("abc");
+    s.execute("text.edit", json!({"layer": t})).unwrap();
+    let first = s.state.text_edit.as_ref().unwrap().session;
+
+    // Replacing Source Text is a new document even though the layer id stays.
+    s.execute("layer.setText", json!({"layer": t, "text": "replaced"})).unwrap();
+    let replaced = s.state.text_edit.as_ref().unwrap().session;
+    assert_ne!(replaced, first, "layer.setText starts a new IME epoch");
+
+    // Undo restores another document: it must not revive the token from before either edit.
+    s.execute("edit.undo", json!({})).unwrap();
+    let undone = s.state.text_edit.as_ref().unwrap().session;
+    assert_ne!(undone, replaced);
+    assert_ne!(undone, first);
+
+    // Clear + immediate undo in the same command sequence: the layer is gone long enough to
+    // end the session, and the restored layer cannot inherit a composition.
+    s.execute("text.edit", json!({"layer": t})).unwrap();
+    s.execute("edit.clear", json!({"layers": [t]})).unwrap();
+    assert!(s.state.text_edit.is_none(), "clearing the edited layer ends the session");
+    s.execute("edit.undo", json!({})).unwrap();
+    assert!(s.state.text_edit.is_none(), "undo does not recreate the old composition session");
+    s.execute("text.edit", json!({"layer": t})).unwrap();
+    assert_ne!(s.state.text_edit.as_ref().unwrap().session, first);
+}
+
+#[test]
+fn ime_session_does_not_cross_a_composition_switch() {
+    let (mut s, t) = session("abc");
+    s.execute("text.edit", json!({"layer": t})).unwrap();
+    let other = s.execute("comp.new", json!({"name": "Other", "width": 320, "height": 180, "duration": 2})).unwrap()["comp"].as_u64().unwrap();
+    s.execute("comp.open", json!({"comp": other})).unwrap();
+    assert!(s.state.text_edit.is_none(), "the old comp's editor is not reused in another comp");
 }
 
 #[test]
@@ -391,4 +432,162 @@ fn set_text_schema_accepts_every_opentype_key_and_requires_none() {
     let (mut s, t) = session("Office 1/2");
     s.execute_checked("layer.setText", json!({"layer": t, "discretionaryLigatures": true, "ss02": true, "ss20": true})).unwrap();
     assert!(doc(&s, t).style_at(0).opentype.stylistic_set(20));
+}
+
+/// Incoming IME replacement (stock `DeleteSurrounding` / the fork's `DeleteSurroundingBytes`):
+/// the characters around the selection go, the selected text stays for the following commit, and
+/// a byte count that ends inside a UTF-8 character leaves that character.
+#[test]
+fn ime_replacement_keeps_the_selection_and_never_splits_a_character() {
+    let (mut s, t) = session("abcdef");
+    s.execute("text.edit", json!({"layer": t})).unwrap();
+    s.execute("text.setSelection", json!({"start": 1, "end": 4})).unwrap();
+    // One character before "bcd" and everything after it: the selection survives for the commit.
+    s.execute("text.deleteSurrounding", json!({"before": 1, "after": 99, "merge": "typing-0"})).unwrap();
+    assert_eq!(doc(&s, t).text, "bcd");
+    assert_eq!(sel(&s), (0, 3), "the selection is kept for the commit that follows");
+    s.execute("text.insert", json!({"text": "X", "merge": "typing-0"})).unwrap();
+    assert_eq!(doc(&s, t).text, "X");
+    assert_eq!(sel(&s), (1, 1));
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(doc(&s, t).text, "abcdef", "the surrounding delete and its commit are one undo step");
+    // An empty count is a no-op (deletion-only batches, empty commits), never an undo step.
+    s.execute("edit.redo", json!({})).unwrap();
+    s.execute("text.setSelection", json!({"start": 0, "end": 1})).unwrap();
+    s.execute("text.deleteSurrounding", json!({"before": 0, "after": 0})).unwrap();
+    assert_eq!(doc(&s, t).text, "X");
+
+    // Byte counts end inside a character: it stays whole (never a split UTF-8 sequence).
+    let (mut s, t) = session("A😀B");
+    s.execute("text.edit", json!({"layer": t})).unwrap();
+    s.execute("text.setSelection", json!({"start": 3, "end": 3})).unwrap();
+    s.execute("text.deleteSurrounding", json!({"before": 2, "after": 0, "bytes": true})).unwrap();
+    assert_eq!(doc(&s, t).text, "A😀", "B is whole, the emoji only partly covered, so both are not one range");
+    s.execute("text.setSelection", json!({"start": 2, "end": 2})).unwrap();
+    s.execute("text.deleteSurrounding", json!({"before": 4, "after": 0, "bytes": true})).unwrap();
+    assert_eq!(doc(&s, t).text, "A", "four bytes cover the whole emoji");
+
+    // A combining mark is one character of two bytes: one byte of it removes nothing.
+    let (mut s, t) = session("e\u{301}");
+    s.execute("text.edit", json!({"layer": t})).unwrap();
+    s.execute("text.setSelection", json!({"start": 2, "end": 2})).unwrap();
+    s.execute("text.deleteSurrounding", json!({"before": 1, "after": 0, "bytes": true})).unwrap();
+    assert_eq!(doc(&s, t).text, "e\u{301}", "a partial combining mark stays");
+    s.execute("text.deleteSurrounding", json!({"before": 2, "after": 0, "bytes": true})).unwrap();
+    assert_eq!(doc(&s, t).text, "e", "the whole combining mark is one character");
+}
+
+/// The outgoing IME query: logical committed text (the pre-edit never enters the model), UTF-8
+/// byte offsets in either selection direction, a bounded window, and an explicit unavailable
+/// answer for a selection that cannot be represented.
+#[test]
+fn ime_surrounding_maps_characters_to_bytes_and_preserves_direction() {
+    let (mut s, t) = session("café😀");
+    s.execute("text.edit", json!({"layer": t})).unwrap();
+    s.execute("text.setSelection", json!({"anchor": 2, "caret": 5})).unwrap();
+    let w = ime_surrounding(&s).expect("an available document");
+    assert_eq!(w.text, "café😀");
+    assert_eq!((w.cursor, w.anchor), (9, 2), "the caret is six characters in, after the emoji; the anchor stays at byte 2");
+    assert_eq!(&w.text[w.cursor..], "");
+    assert_eq!(&w.text[..w.anchor], "ca");
+
+    // Reversed: the caret stays the primary end and the anchor the other one.
+    s.execute("text.setSelection", json!({"anchor": 5, "caret": 2})).unwrap();
+    let reversed = ime_surrounding(&s).expect("an available document");
+    assert_eq!((reversed.cursor, reversed.anchor), (2, 9), "cursor > anchor is preserved after the conversion");
+    assert_eq!(&reversed.text[reversed.cursor..reversed.anchor], "fé😀");
+
+    // An available empty document is not the unavailable state.
+    let (mut s, t) = session("");
+    s.execute("text.edit", json!({"layer": t})).unwrap();
+    let empty = ime_surrounding(&s).expect("empty text is available");
+    assert_eq!((empty.text.as_str(), empty.cursor, empty.anchor), ("", 0, 0));
+
+    // No edit session: unavailable, not an empty document.
+    let (s, _) = session("text");
+    assert!(ime_surrounding(&s).is_none());
+}
+
+#[test]
+fn ime_surrounding_is_bounded_and_refuses_a_too_wide_selection() {
+    // A long line: the query copies only a window around the caret, never the document.
+    let text = "a".repeat(20_000);
+    let (mut s, t) = session(&text);
+    s.execute("text.edit", json!({"layer": t, "caret": 10_000})).unwrap();
+    let w = ime_surrounding(&s).expect("a collapsed caret fits");
+    assert!(w.text.len() <= MAX_IME_TEXT_BYTES, "the payload is bounded");
+    assert!(w.text.len() > 1000, "the caret keeps a useful amount of context");
+    assert!(w.text.is_char_boundary(w.cursor) && w.text.is_char_boundary(w.anchor));
+    assert_eq!(w.cursor, w.anchor);
+
+    // A selection wider than the protocol limit is unavailable, not a truncated one.
+    s.execute("text.setSelection", json!({"start": 0, "end": 20_000})).unwrap();
+    assert!(ime_surrounding(&s).is_none(), "a too-wide selection is unavailable");
+
+    // Multi-byte text at the window boundary is never split, and offsets stay on boundaries.
+    let text = "é".repeat(5_000);
+    let (mut s, t) = session(&text);
+    s.execute("text.edit", json!({"layer": t, "caret": 2_500})).unwrap();
+    let w = ime_surrounding(&s).expect("a collapsed caret fits");
+    assert!(w.text.len() <= MAX_IME_TEXT_BYTES);
+    assert!(w.text.is_char_boundary(w.cursor));
+    assert_eq!(&w.text[w.cursor..w.cursor + "é".len()], "é");
+}
+
+/// A reversed selection survives a byte-count deletion: both endpoints shift by the removed
+/// characters before the selection, its direction stays reversed, and partial characters on
+/// either side stay whole.
+#[test]
+fn ime_byte_deletion_keeps_a_reversed_selection_direction() {
+    let (mut s, t) = session("😀ab😀");
+    s.execute("text.edit", json!({"layer": t})).unwrap();
+    s.execute("text.setSelection", json!({"anchor": 3, "caret": 1})).unwrap();
+    let (anchor, caret) = sel(&s);
+    assert_eq!((anchor, caret), (3, 1), "reversed before the replacement");
+
+    // Three bytes cover only part of either four-byte emoji: neither is split or removed.
+    s.execute("text.deleteSurrounding", json!({"before": 3, "after": 3, "bytes": true})).unwrap();
+    assert_eq!(doc(&s, t).text, "😀ab😀");
+
+    // Four bytes cover each whole emoji: the selection text stays, shifted, still reversed.
+    s.execute("text.deleteSurrounding", json!({"before": 4, "after": 4, "bytes": true})).unwrap();
+    assert_eq!(doc(&s, t).text, "ab");
+    assert_eq!(sel(&s), (2, 0), "the anchor stays after the caret");
+    let w = ime_surrounding(&s).expect("available");
+    assert_eq!((w.text.as_str(), w.cursor, w.anchor), ("ab", 0, 2), "the outgoing offsets keep the direction");
+}
+
+#[test]
+fn deselect_all_ends_the_open_edit() {
+    let (mut s, t) = session("Hello");
+    s.execute("text.edit", json!({"layer": t, "caret": 5})).unwrap();
+    s.execute("text.insert", json!({"text": "!"})).unwrap();
+    assert_eq!(doc(&s, t).text, "Hello!");
+    s.execute("edit.deselectAll", json!({})).unwrap();
+    assert!(s.state.text_edit.is_none(), "Deselect All ends the open text edit on every route");
+    assert!(s.state.selected_layers.is_empty(), "and leaves nothing selected");
+    assert_eq!(doc(&s, t).text, "Hello!", "the text stays committed");
+    // Ending an edit is no undoable step of its own (as with text.endEdit): undo takes
+    // the typed text, it does not reopen the edit.
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(doc(&s, t).text, "Hello", "undo reverts the typed text, not the deselection");
+    assert!(s.state.text_edit.is_none(), "undo does not reopen the edit");
+}
+
+#[test]
+fn deselect_all_discards_an_empty_type_tool_layer() {
+    let (mut s, _keep) = session("Hello");
+    let new = s.execute("layer.newText", json!({"text": "", "position": [80.0, 80.0], "edit": true})).unwrap()["layer"].as_u64().unwrap();
+    assert!(
+        s.state.text_edit.as_ref().is_some_and(|e| e.created && e.layer == effectcraft_project::LayerId(new)),
+        "the Type tool opens the edit on its new, empty layer"
+    );
+    let count = |s: &Session| s.active_comp().map_or(0, |c| c.layers.len());
+    let before = count(&s);
+    s.execute("edit.deselectAll", json!({})).unwrap();
+    assert!(s.state.text_edit.is_none());
+    assert!(s.state.selected_layers.is_empty());
+    assert_eq!(count(&s), before - 1, "a Type-tool layer left empty is removed, as text.endEdit does");
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(count(&s), before, "that removal is one undo step of its own, as on text.endEdit");
 }

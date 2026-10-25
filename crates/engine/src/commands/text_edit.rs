@@ -10,11 +10,19 @@ use effectcraft_project::{LayerId, LayerSource};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// Session tokens for the on-canvas editor, unique across the process (so a recreated session
+/// never reuses a live IME context). Exhaustion wraps; it cannot panic.
+static NEXT_EDIT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+pub(super) fn next_edit_session() -> u64 {
+    NEXT_EDIT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 use super::{CommandSpec, b_p, bad, comp_id, layer_mut, resolve_layer, str_p};
 use crate::{EditorState, EngineError, Result, Session, cmd};
 
 /// An on-canvas text editing session.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextEdit {
     pub layer: LayerId,
     pub anchor: usize,
@@ -28,6 +36,21 @@ pub struct TextEdit {
     /// Line position kept by repeated up / down moves (layout space).
     #[serde(default)]
     pub goal_x: Option<f64>,
+    /// This editing session's identity.
+    ///
+    /// It changes when the editor is started, its layer/document is replaced (including by
+    /// undo/redo), or the editor is restored from another state. It is deliberately not
+    /// serialized: a saved token belongs to a previous process and cannot identify a new
+    /// target. The IME owner uses it as its replacement epoch, so an old composition is never
+    /// inherited by a recreated layer or a replaced document.
+    #[serde(skip, default = "next_edit_session")]
+    pub session: u64,
+}
+
+impl Default for TextEdit {
+    fn default() -> Self {
+        Self { layer: LayerId(0), anchor: 0, caret: 0, pending: None, created: false, goal_x: None, session: next_edit_session() }
+    }
 }
 
 impl TextEdit {
@@ -47,6 +70,130 @@ pub fn layer_doc(s: &Session, lid: LayerId) -> Option<TextDoc> {
         KV::Str(t) => Some(TextDoc::plain(&t)),
         _ => None,
     }
+}
+
+/// The largest committed-text window an IME observation copies.
+///
+/// This mirrors `egui::output::MAX_IME_SURROUNDING_TEXT_BYTES`: a selection wider than this is
+/// reported as unavailable rather than silently truncated.
+pub const MAX_IME_TEXT_BYTES: usize = 4000;
+
+/// Bounded committed text around an IME selection, with UTF-8 byte offsets.
+///
+/// The Type tool keeps the input method's pre-edit in egui's temporary data, never in the
+/// layer's [`TextDoc`], so [`Self::text`] is committed text only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImeSurrounding {
+    /// At most [`MAX_IME_TEXT_BYTES`] bytes of the edited layer's text.
+    pub text: String,
+    /// The caret (primary selection end) as a UTF-8 byte offset in [`Self::text`].
+    pub cursor: usize,
+    /// The other selection end; larger than `cursor` for a reversed selection.
+    pub anchor: usize,
+}
+
+impl ImeSurrounding {
+    /// A bounded window of `text` around the selection `cursor`/`anchor`.
+    ///
+    /// Returns `None` when an offset is past the text or inside a character, or when the
+    /// selection itself is wider than [`MAX_IME_TEXT_BYTES`]: the caller then reports
+    /// surrounding text as unavailable instead of sending a truncated selection.
+    pub fn from_text(text: &str, cursor: usize, anchor: usize) -> Option<Self> {
+        if cursor > text.len() || anchor > text.len() || !text.is_char_boundary(cursor) || !text.is_char_boundary(anchor) {
+            return None;
+        }
+        let (start, end) = (cursor.min(anchor), cursor.max(anchor));
+        let selection = end - start;
+        if selection > MAX_IME_TEXT_BYTES {
+            return None;
+        }
+        // Spend the remaining budget on both sides of the selection, giving unused room on one
+        // side to the other. Only this bounded window is copied.
+        let budget = MAX_IME_TEXT_BYTES - selection;
+        let mut before = (budget / 2).min(start);
+        let mut after = (budget - before).min(text.len() - end);
+        before = (budget - after).min(start);
+        after = (budget - before).min(text.len() - end);
+        let mut window_start = start - before;
+        let mut window_end = end + after;
+        // Byte budgets can land inside a multi-byte character: shrink the window so it never
+        // splits one and the selection stays inside it.
+        while window_start < start && !text.is_char_boundary(window_start) {
+            window_start += 1;
+        }
+        while end < window_end && !text.is_char_boundary(window_end) {
+            window_end -= 1;
+        }
+        Some(Self {
+            text: text.get(window_start..window_end)?.to_owned(),
+            cursor: cursor.checked_sub(window_start)?,
+            anchor: anchor.checked_sub(window_start)?,
+        })
+    }
+}
+
+/// The edited layer's committed text around its selection, or `None` when there is no edit
+/// session, the layer is gone, or the selection is wider than [`MAX_IME_TEXT_BYTES`].
+///
+/// The caret and the anchor are converted to UTF-8 byte offsets separately, so a reversed
+/// selection stays reversed. A valid empty document is `Some` with empty text, never `None`.
+pub fn ime_surrounding(s: &Session) -> Option<ImeSurrounding> {
+    let e = s.state.text_edit.as_ref()?;
+    let comp = s.active_comp()?;
+    let layer = comp.layer(e.layer)?;
+    let prop = layer.props.prop("text/sourceText")?;
+    // A static Source Text (the normal case) is borrowed in place; only an animated one has to
+    // be evaluated into a temporary. Either way only the bounded window is copied.
+    if !prop.is_animated() {
+        return match &prop.value {
+            KV::Text(doc) => {
+                let (caret, anchor) = doc_bytes(doc, e.caret, e.anchor);
+                ImeSurrounding::from_text(&doc.text, caret, anchor)
+            }
+            KV::Str(text) => {
+                let (caret, anchor) = char_bytes(text, e.caret, e.anchor);
+                ImeSurrounding::from_text(text, caret, anchor)
+            }
+            _ => None,
+        };
+    }
+    match prop.value_at(layer.layer_time(s.time())) {
+        KV::Text(doc) => {
+            let (caret, anchor) = doc_bytes(&doc, e.caret, e.anchor);
+            ImeSurrounding::from_text(&doc.text, caret, anchor)
+        }
+        KV::Str(text) => {
+            let (caret, anchor) = char_bytes(&text, e.caret, e.anchor);
+            ImeSurrounding::from_text(&text, caret, anchor)
+        }
+        _ => None,
+    }
+}
+
+/// Byte offsets of two character positions in `text` (clamped to its end), scanning once.
+///
+/// The second position may be before the first; the returned pair keeps the caller's order.
+fn char_bytes(text: &str, first: usize, second: usize) -> (usize, usize) {
+    let (lo, hi) = if first <= second { (first, second) } else { (second, first) };
+    let mut lo_byte = if lo == 0 { 0 } else { text.len() };
+    let mut hi_byte = if hi == 0 { 0 } else { text.len() };
+    if hi != 0 {
+        for (i, (b, _)) in text.char_indices().enumerate() {
+            if i == lo {
+                lo_byte = b;
+            }
+            if i == hi {
+                hi_byte = b;
+                break;
+            }
+        }
+    }
+    if first <= second { (lo_byte, hi_byte) } else { (hi_byte, lo_byte) }
+}
+
+/// Byte offsets of the editor's caret and anchor in a document, in that order.
+fn doc_bytes(doc: &TextDoc, caret: usize, anchor: usize) -> (usize, usize) {
+    char_bytes(&doc.text, caret, anchor)
 }
 
 /// The text layer a text command targets: `layer`, the edited layer, or the selected text layer.
@@ -78,7 +225,7 @@ fn session_on(s: &mut Session, lid: LayerId) -> TextEdit {
         Some(e) if e.layer == lid => e.clone(),
         _ => {
             let n = layer_doc(s, lid).map_or(0, |d| d.char_len());
-            let e = TextEdit { layer: lid, anchor: n, caret: n, ..Default::default() };
+            let e = TextEdit { layer: lid, anchor: n, caret: n, session: next_edit_session(), ..Default::default() };
             s.state.selected_layers = vec![lid];
             s.state.text_edit = Some(e.clone());
             e
@@ -153,13 +300,13 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let created = b_p(p, "created").unwrap_or(false);
     s.state.selected_layers = vec![lid];
-    s.state.text_edit = Some(TextEdit { layer: lid, anchor, caret, created, ..Default::default() });
+    s.state.text_edit = Some(TextEdit { layer: lid, anchor, caret, created, session: next_edit_session(), ..Default::default() });
     s.bump();
     Ok(state_json(s))
 }
 
 /// `text.endEdit`: stop editing (a Type-tool layer left empty is deleted).
-fn end_edit(s: &mut Session, _: &Value) -> Result<Value> {
+pub(crate) fn end_edit(s: &mut Session, _: &Value) -> Result<Value> {
     let Some(e) = s.state.text_edit.take() else { return Ok(Value::Null) };
     if e.created && layer_doc(s, e.layer).is_some_and(|d| d.text.is_empty()) {
         let cid = s.active_comp_id().ok_or(EngineError::NoComp)?;
@@ -314,6 +461,78 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(state_json(s))
 }
 
+/// How many whole characters `before_bytes` / `after_bytes` cover around `r`.
+///
+/// This is the input method's own byte count, as winit reports it: a count that ends inside a
+/// UTF-8 character leaves that whole character (stock egui's `surrounding_bytes_to_chars`), so a
+/// malformed or platform-specific offset never splits or corrupts the document.
+fn surrounding_bytes_as_chars(text: &str, n: usize, r: std::ops::Range<usize>, before_bytes: usize, after_bytes: usize) -> (usize, usize) {
+    let r = r.start.min(n)..r.end.min(n);
+    let (start_byte, end_byte) = char_bytes(text, r.start, r.end);
+    let from = start_byte.saturating_sub(before_bytes);
+    let before = text.get(..start_byte).map_or(0, |head| head.char_indices().rev().take_while(|(i, _)| *i >= from).count());
+    let after = text.get(end_byte..).map_or(0, |tail| tail.char_indices().take_while(|(i, c)| i.saturating_add(c.len_utf8()) <= after_bytes).count());
+    (before.min(r.start), after.min(n.saturating_sub(r.end)))
+}
+
+/// Delete the text an input method marks for replacement around the selection
+/// (`DeleteSurrounding`, `DeleteSurroundingBytes`).
+///
+/// Unlike [`delete`] with an explicit range, the **selection stays**: the characters before its
+/// start and after its end are removed in two separate ranges, and the following `Commit`
+/// replaces the selected text. `bytes` counts UTF-8 bytes (`before`/`after` are characters
+/// otherwise); a count that ends inside a character leaves that character.
+///
+/// The counts are computed from the one document `edit_doc` already evaluated, so an animated
+/// Source Text and a large static document are not copied or evaluated again just to decide what
+/// the input method asked to replace.
+fn delete_surrounding(s: &mut Session, p: &Value) -> Result<Value> {
+    let lid = target(s, p, "text.deleteSurrounding")?;
+    // Only an open edit session has a selection to keep: without one there is nothing an input
+    // method could be replacing.
+    let e = match &s.state.text_edit {
+        Some(e) if e.layer == lid => e.clone(),
+        _ => return Err(bad("text.deleteSurrounding", "not editing this text layer")),
+    };
+    let count = |k: &str| p.get(k).and_then(Value::as_u64).map_or(0, |v| usize::try_from(v).unwrap_or(usize::MAX));
+    let (before_count, after_count) = (count("before"), count("after"));
+    let bytes = b_p(p, "bytes").unwrap_or(false);
+    let merge = str_p(p, "merge").map(str::to_string);
+    edit_doc(s, "Edit Text", merge.as_deref(), lid, |doc, st| {
+        let n = doc.char_len();
+        let r = e.range().start.min(n)..e.range().end.min(n);
+        let (before, after) = if bytes {
+            surrounding_bytes_as_chars(&doc.text, n, r.clone(), before_count, after_count)
+        } else {
+            (before_count.min(r.start), after_count.min(n.saturating_sub(r.end)))
+        };
+        let start = r.start.saturating_sub(before);
+        let end = r.end.saturating_add(after).min(n);
+        if start == r.start && end == r.end {
+            // Deletion-only batches with an empty count, or a document with nothing around the
+            // selection: no empty undo step.
+            return Ok(());
+        }
+        // The selection keeps its text: remove after it first, then before it, so the two ranges
+        // stay valid and the caret/selection shift by the characters before it.
+        if end > r.end {
+            doc.replace_range(r.end..end, "", None);
+        }
+        if r.start > start {
+            doc.replace_range(start..r.start, "", None);
+        }
+        if let Some(ed) = st.text_edit.as_mut().filter(|ed| ed.layer == lid) {
+            let shift = r.start.saturating_sub(start);
+            ed.anchor = ed.anchor.saturating_sub(shift);
+            ed.caret = ed.caret.saturating_sub(shift);
+            ed.pending = None;
+            ed.goal_x = None;
+        }
+        Ok(())
+    })?;
+    Ok(state_json(s))
+}
+
 /// Selected text (plain) of the session, and its formatted fragment.
 fn selection_doc(s: &Session) -> Option<TextDoc> {
     let e = s.state.text_edit.as_ref()?;
@@ -448,18 +667,28 @@ fn paste_formatting(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(state_json(s))
 }
 
+/// Give the current editor a fresh replacement epoch after its document/layer was replaced.
+pub(crate) fn invalidate_session(s: &mut Session) {
+    if let Some(e) = s.state.text_edit.as_mut() {
+        e.session = next_edit_session();
+    }
+}
+
 /// Keep the session valid after undo / external edits: clamp the selection, drop it when the
 /// layer is gone or not in the active comp.
+///
+/// Any call to this function follows an undo/redo, a project-level deletion or a rolled-back
+/// batch. The document may have been replaced even when the same layer id exists again, so the
+/// composition epoch is advanced before the session is kept.
 pub(crate) fn sanitize(s: &mut Session) {
     let Some(e) = s.state.text_edit.clone() else { return };
     match layer_doc(s, e.layer) {
         Some(d) => {
             let n = d.char_len();
-            if (e.anchor > n || e.caret > n)
-                && let Some(ed) = s.state.text_edit.as_mut()
-            {
+            if let Some(ed) = s.state.text_edit.as_mut() {
                 ed.anchor = ed.anchor.min(n);
                 ed.caret = ed.caret.min(n);
+                ed.session = next_edit_session();
             }
         }
         None => s.state.text_edit = None,
@@ -593,6 +822,15 @@ pub fn specs() -> Vec<CommandSpec> {
             "{layer?, direction?: backward|forward, word?, range?: [start, end], merge?}",
             editing_or_text_layer,
             delete
+        ),
+        cmd!(
+            "text.deleteSurrounding",
+            "Delete Text Around Selection",
+            [],
+            None,
+            "{layer?, before?, after?, bytes?, merge?} (input-method replacement: the characters before and after the selection are deleted, the selection stays; bytes counts UTF-8 bytes)",
+            editing_or_text_layer,
+            delete_surrounding
         ),
         cmd!(
             "edit.pasteTextMatchFormatting",
