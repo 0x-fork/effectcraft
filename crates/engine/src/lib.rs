@@ -867,6 +867,8 @@ impl Session {
         });
         if self.state.active_comp.is_some_and(|c| p.comp(c).is_none()) {
             self.clear_live_selection();
+            // A matching layer id in the fallback comp is not the document being edited.
+            self.state.text_edit = None;
             self.state.active_comp = self.state.open_comps.first().copied();
             if let Some(id) = self.state.active_comp {
                 self.recall_selection(id);

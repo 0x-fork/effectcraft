@@ -526,6 +526,34 @@ struct SavedWorkspaces {
     floating: std::collections::BTreeMap<String, Vec<dock::Floating>>,
 }
 
+/// The comp frames a playback pass covers (`first..=last`).
+#[derive(Clone, Copy, Debug)]
+struct FrameWindow {
+    first: i64,
+    last: i64,
+}
+
+/// The inputs of one playback pass: the viewer series it renders, the preview plan and
+/// position, and the frame range and clock settings its steps share. `queued` is a snapshot of
+/// the in-flight render count that each step copies. Built once in `advance_playback`.
+#[derive(Clone, Copy)]
+struct PlaybackPass<'a> {
+    ctx: &'a egui::Context,
+    comp: &'a effectcraft_engine::project::Comp,
+    cid: ItemId,
+    scale: f64,
+    now: f64,
+    frame_rate: effectcraft_engine::time::FrameRate,
+    series: FrameKey,
+    plan: Option<effectcraft_engine::preview::PreviewPlan>,
+    window: FrameWindow,
+    cur: i64,
+    video: bool,
+    looping: bool,
+    ahead: i64,
+    queued: usize,
+}
+
 impl EffectcraftApp {
     pub fn new(session: Session) -> Self {
         let mut ui = UiState::default();
@@ -1408,23 +1436,39 @@ impl EffectcraftApp {
         // The preview's position orders prefetch and eviction (#595).
         let playhead = plan.filter(|p| p.video).map(|p| frames::Playhead { series, cur, start: p.start, end: p.end, step: p.step, looping: p.looping });
         self.frames.set_playhead(playhead);
-        if self.cache_preview(ctx, &c, cid, scale, now, fr, series, plan, ahead, queued) {
+        let pass = PlaybackPass {
+            ctx,
+            comp: &c,
+            cid,
+            scale,
+            now,
+            frame_rate: fr,
+            series,
+            plan,
+            window: FrameWindow { first: wa, last: wb },
+            cur,
+            video,
+            looping,
+            ahead,
+            queued,
+        };
+        if self.cache_preview(&pass) {
             return;
         }
         let step = plan.map_or(1, |p| p.step);
         let fit_ahead = self.frames_that_fit(&c, scale) - 1;
-        self.prefetch_playback(cid, scale, plan, cur, wa, wb, ahead, fit_ahead, series, queued, video);
+        self.prefetch_playback(&pass, fit_ahead);
         self.pump_meters(ctx, now);
         if !self.playback.playing {
             self.cache_when_idle(ctx, &c, &series, now, input_active, (wa, wb));
             return;
         }
         let fit = self.frames_that_fit(&c, scale);
-        self.start_held_audio(now, plan, series, cur, ahead, fit, fr);
-        if self.advance_audio_clock(ctx, now, series, wa, wb, video, fr, cur, step) {
+        self.start_held_audio(&pass, fit);
+        if self.advance_audio_clock(&pass, step) {
             return;
         }
-        self.advance_frame_clock(ctx, now, plan, video, looping, wa, wb, fr, cur, step, series);
+        self.advance_frame_clock(&pass, step);
     }
 
     /// While paused (scrubbing, editing) the viewer's frame comes first: prefetch only a few
@@ -1449,19 +1493,8 @@ impl EffectcraftApp {
     /// Cache Before Playback: the range in play order, then start the clock. A range larger than
     /// the RAM preview budget is cut to the frames that fit (caching more would evict the first
     /// ones and never finish). Returns true when this pass handled the preview.
-    fn cache_preview(
-        &mut self,
-        ctx: &egui::Context,
-        comp: &effectcraft_engine::project::Comp,
-        cid: ItemId,
-        scale: f64,
-        now: f64,
-        fr: effectcraft_engine::time::FrameRate,
-        series: FrameKey,
-        plan: Option<effectcraft_engine::preview::PreviewPlan>,
-        ahead: i64,
-        mut queued: usize,
-    ) -> bool {
+    fn cache_preview(&mut self, pass: &PlaybackPass<'_>) -> bool {
+        let PlaybackPass { ctx, comp, cid, scale, now, frame_rate: fr, series, plan, ahead, mut queued, .. } = *pass;
         if !self.playback.caching {
             return false;
         }
@@ -1506,20 +1539,9 @@ impl EffectcraftApp {
     /// and a window from the playhead left the workers idle until it came near the end of the
     /// cached run. It stays ahead × 3 frames wide: workers spread over the whole preview render
     /// frames with different layers at once (on the GPU, an atlas each: #1812).
-    fn prefetch_playback(
-        &self,
-        cid: ItemId,
-        scale: f64,
-        plan: Option<effectcraft_engine::preview::PreviewPlan>,
-        cur: i64,
-        wa: i64,
-        wb: i64,
-        ahead: i64,
-        fit_ahead: i64,
-        series: FrameKey,
-        mut queued: usize,
-        video: bool,
-    ) {
+    fn prefetch_playback(&self, pass: &PlaybackPass<'_>, fit_ahead: i64) {
+        let PlaybackPass { cid, scale, plan, cur, ahead, series, mut queued, video, .. } = *pass;
+        let FrameWindow { first: wa, last: wb } = pass.window;
         let frame = |k: i64| match plan {
             Some(p) => p.frame_after(cur, k),
             None => {
@@ -1568,16 +1590,8 @@ impl EffectcraftApp {
 
     /// Held sound starts once the frames ahead are cached (see `Playback::audio_held`): the
     /// prefetch window when the silent preview keeps real time, else the rest of the preview.
-    fn start_held_audio(
-        &mut self,
-        now: f64,
-        plan: Option<effectcraft_engine::preview::PreviewPlan>,
-        series: FrameKey,
-        cur: i64,
-        ahead: i64,
-        fit: i64,
-        fr: effectcraft_engine::time::FrameRate,
-    ) {
+    fn start_held_audio(&mut self, pass: &PlaybackPass<'_>, fit: i64) {
+        let PlaybackPass { now, plan, series, cur, ahead, frame_rate: fr, .. } = *pass;
         if !self.playback.audio_held {
             return;
         }
@@ -1592,18 +1606,9 @@ impl EffectcraftApp {
 
     /// Audio clock drives playback: show the frame under the audible sample. Returns true when
     /// the audio path handled this pass (including stopping at the end).
-    fn advance_audio_clock(
-        &mut self,
-        ctx: &egui::Context,
-        now: f64,
-        series: FrameKey,
-        wa: i64,
-        wb: i64,
-        video: bool,
-        fr: effectcraft_engine::time::FrameRate,
-        cur: i64,
-        step: i64,
-    ) -> bool {
+    fn advance_audio_clock(&mut self, pass: &PlaybackPass<'_>, step: i64) -> bool {
+        let PlaybackPass { ctx, now, series, video, frame_rate: fr, cur, .. } = *pass;
+        let FrameWindow { first: wa, last: wb } = pass.window;
         let Some(a) = &self.audio else { return false };
         if a.finished() {
             if video {
@@ -1641,20 +1646,9 @@ impl EffectcraftApp {
 
     /// The wall clock advances the preview when no audio device drives it, and shows the target
     /// frame (or holds when it is not cached yet).
-    fn advance_frame_clock(
-        &mut self,
-        ctx: &egui::Context,
-        now: f64,
-        plan: Option<effectcraft_engine::preview::PreviewPlan>,
-        video: bool,
-        looping: bool,
-        wa: i64,
-        wb: i64,
-        fr: effectcraft_engine::time::FrameRate,
-        cur: i64,
-        step: i64,
-        series: FrameKey,
-    ) {
+    fn advance_frame_clock(&mut self, pass: &PlaybackPass<'_>, step: i64) {
+        let PlaybackPass { ctx, now, plan, video, looping, frame_rate: fr, cur, series, .. } = *pass;
+        let FrameWindow { first: wa, last: wb } = pass.window;
         let elapsed = now - self.playback.start_wall;
         // The plan carries the rate the preview was started with (and `play_with` copies it to
         // `Playback::fps`). Deriving the frame from the plan keeps a logic-only tick correct even

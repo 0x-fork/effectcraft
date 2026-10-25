@@ -24,6 +24,98 @@ fn sel(s: &Session) -> (usize, usize) {
     (e.anchor, e.caret)
 }
 
+/// Start editing the text layer with everything selected (no caret given).
+fn begin_edit(s: &mut Session, t: u64) {
+    s.execute("text.edit", json!({"layer": t})).unwrap();
+}
+
+/// Start editing the text layer with the caret at `caret`.
+fn begin_edit_at(s: &mut Session, t: u64, caret: usize) {
+    s.execute("text.edit", json!({"layer": t, "caret": caret})).unwrap();
+}
+
+/// A session with one text layer already open in the editor at `caret`.
+fn editing(text: &str, caret: usize) -> (Session, u64) {
+    let (mut s, t) = session(text);
+    begin_edit_at(&mut s, t, caret);
+    (s, t)
+}
+
+/// A session with one text layer already open in the editor with everything selected.
+fn editing_all(text: &str) -> (Session, u64) {
+    let (mut s, t) = session(text);
+    begin_edit(&mut s, t);
+    (s, t)
+}
+
+/// The IME owner token of the open editor.
+fn ime_owner(s: &Session) -> u64 {
+    s.state.text_edit.as_ref().unwrap().session
+}
+
+fn undo_steps(s: &Session) -> usize {
+    s.history.undo.len()
+}
+
+/// The editor kept its document (same IME owner).
+fn assert_ime_owner(s: &Session, expected: u64, why: &str) {
+    assert_eq!(ime_owner(s), expected, "{why}");
+}
+
+/// The editor's document was replaced (new IME owner/epoch).
+fn assert_ime_epoch_changed(s: &Session, previous: u64, why: &str) {
+    assert_ne!(ime_owner(s), previous, "{why}");
+}
+
+fn assert_text(s: &Session, t: u64, expected: &str) {
+    assert_eq!(doc(s, t).text, expected);
+}
+
+/// A new, empty composition called "Other" (the standard second comp).
+fn new_other_comp(s: &mut Session) -> u64 {
+    s.execute("comp.new", json!({"name": "Other", "width": 320, "height": 180, "duration": 2})).unwrap()["comp"].as_u64().unwrap()
+}
+
+/// Stopwatch the layer's Source Text (one key at the CTI).
+fn animate_source(s: &mut Session, t: u64) {
+    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
+}
+
+/// Add a Source Text key at `time`.
+fn add_source_key(s: &mut Session, t: u64, time: f64, value: &str) {
+    s.execute("prop.addKey", json!({"layer": t, "path": "text/sourceText", "time": time, "value": value})).unwrap();
+}
+
+/// Write Source Text as a static value (a replacement when it differs from the shown text).
+fn set_source(s: &mut Session, t: u64, value: &str) {
+    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "value": value})).unwrap();
+}
+
+/// Write the Source Text key at `time`.
+fn set_source_key(s: &mut Session, t: u64, time: f64, value: &str) {
+    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "time": time, "value": value})).unwrap();
+}
+
+/// Set the Source Text key at the CTI (`keys.set`).
+fn set_source_cti_key(s: &mut Session, t: u64, time: f64, value: &str) {
+    s.execute("keys.set", json!({"layer": t, "path": "text/sourceText", "time": time, "value": value})).unwrap();
+}
+
+/// Replace the whole Source Text of the layer (`layer.setText`).
+fn replace_text(s: &mut Session, t: u64, text: &str) {
+    s.execute("layer.setText", json!({"layer": t, "text": text})).unwrap();
+}
+
+/// Select the character range `start..end` in the open editor.
+fn select(s: &mut Session, start: usize, end: usize) {
+    s.execute("text.setSelection", json!({"start": start, "end": end})).unwrap();
+}
+
+/// Set both selection ends, keeping their direction (`anchor` is the other end).
+fn select_anchor(s: &mut Session, anchor: usize, caret: usize) {
+    s.execute("text.setSelection", json!({"anchor": anchor, "caret": caret})).unwrap();
+}
+
 #[test]
 fn set_text_with_a_range_creates_runs_and_undoes() {
     let (mut s, t) = session("Hello World");
@@ -209,30 +301,29 @@ fn edit_state_round_trips_through_serde() {
 
 #[test]
 fn ime_session_epoch_tracks_replaced_text_and_layer_restoration() {
-    let (mut s, t) = session("abc");
-    s.execute("text.edit", json!({"layer": t})).unwrap();
-    let first = s.state.text_edit.as_ref().unwrap().session;
+    let (mut s, t) = editing_all("abc");
+    let first = ime_owner(&s);
 
     // Replacing Source Text is a new document even though the layer id stays.
-    s.execute("layer.setText", json!({"layer": t, "text": "replaced"})).unwrap();
-    let replaced = s.state.text_edit.as_ref().unwrap().session;
+    replace_text(&mut s, t, "replaced");
+    let replaced = ime_owner(&s);
     assert_ne!(replaced, first, "layer.setText starts a new IME epoch");
 
     // Undo restores another document: it must not revive the token from before either edit.
     s.execute("edit.undo", json!({})).unwrap();
-    let undone = s.state.text_edit.as_ref().unwrap().session;
+    let undone = ime_owner(&s);
     assert_ne!(undone, replaced);
     assert_ne!(undone, first);
 
     // Clear + immediate undo in the same command sequence: the layer is gone long enough to
     // end the session, and the restored layer cannot inherit a composition.
-    s.execute("text.edit", json!({"layer": t})).unwrap();
+    begin_edit(&mut s, t);
     s.execute("edit.clear", json!({"layers": [t]})).unwrap();
     assert!(s.state.text_edit.is_none(), "clearing the edited layer ends the session");
     s.execute("edit.undo", json!({})).unwrap();
     assert!(s.state.text_edit.is_none(), "undo does not recreate the old composition session");
-    s.execute("text.edit", json!({"layer": t})).unwrap();
-    assert_ne!(s.state.text_edit.as_ref().unwrap().session, first);
+    begin_edit(&mut s, t);
+    assert_ne!(ime_owner(&s), first);
 }
 
 #[test]
@@ -250,8 +341,8 @@ fn no_op_ime_deletion_keeps_a_static_plain_text_value_and_records_no_step() {
         .prop_mut("text/sourceText")
         .unwrap();
     pr.value = KV::Str("abc".into());
-    s.execute("text.edit", json!({"layer": t, "caret": 0})).unwrap();
-    let steps = s.history.undo.len();
+    begin_edit_at(&mut s, t, 0);
+    let steps = undo_steps(&s);
 
     // A non-zero before count at the document start deletes nothing.
     s.execute("text.deleteSurrounding", json!({"before": 1, "after": 0})).unwrap();
@@ -259,98 +350,94 @@ fn no_op_ime_deletion_keeps_a_static_plain_text_value_and_records_no_step() {
     let pr = s.active_comp().unwrap().layer(effectcraft_project::LayerId(t)).unwrap().props.prop("text/sourceText").unwrap();
     assert!(matches!(&pr.value, KV::Str(_)), "a no-op keeps the static Str variant");
     assert!(pr.keys.is_empty());
-    assert_eq!(s.history.undo.len(), steps, "a no-op adds no undo step");
+    assert_eq!(undo_steps(&s), steps, "a no-op adds no undo step");
 }
 
 #[test]
 fn no_op_ime_deletion_does_not_add_a_keyframe_to_animated_source_text() {
-    let (mut s, t) = session("abc");
-    s.execute("text.edit", json!({"layer": t, "caret": 0})).unwrap();
-    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
+    let (mut s, t) = editing("abc", 0);
+    animate_source(&mut s, t);
     let lid = effectcraft_project::LayerId(t);
     let keys = |s: &Session| s.active_comp().unwrap().layer(lid).unwrap().props.prop("text/sourceText").unwrap().keys.len();
     assert_eq!(keys(&s), 1, "one key from the stopwatch");
     s.execute("time.set", json!({"time": 1.0})).unwrap();
-    let steps = s.history.undo.len();
+    let steps = undo_steps(&s);
 
     // A non-zero before count at the document start deletes nothing, at a time with no key.
     s.execute("text.deleteSurrounding", json!({"before": 1, "after": 0})).unwrap();
 
     assert_eq!(keys(&s), 1, "a no-op does not key Source Text at the CTI");
-    assert_eq!(s.history.undo.len(), steps, "a no-op adds no undo step");
+    assert_eq!(undo_steps(&s), steps, "a no-op adds no undo step");
 }
 
 #[test]
 fn property_writes_replace_the_edited_document_only_when_the_text_changes() {
     let (mut s, t) = session("abc");
     let other = s.execute("layer.newText", json!({"text": "other"})).unwrap()["layer"].as_u64().unwrap();
-    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
-    let owner = s.state.text_edit.as_ref().unwrap().session;
-    let steps = s.history.undo.len();
+    begin_edit_at(&mut s, t, 1);
+    let owner = ime_owner(&s);
+    let steps = undo_steps(&s);
 
     // Writing the text the document already has is a no-op: same document, same owner, no step.
-    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "value": "abc"})).unwrap();
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "a no-op write keeps the IME owner");
-    assert_eq!(s.history.undo.len(), steps, "a no-op write records no undo step");
-    s.execute("layer.setText", json!({"layer": t, "text": "abc"})).unwrap();
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "a no-op layer.setText keeps the IME owner");
-    assert_eq!(s.history.undo.len(), steps, "a no-op layer.setText records no undo step");
+    set_source(&mut s, t, "abc");
+    assert_ime_owner(&s, owner, "a no-op write keeps the IME owner");
+    assert_eq!(undo_steps(&s), steps, "a no-op write records no undo step");
+    replace_text(&mut s, t, "abc");
+    assert_ime_owner(&s, owner, "a no-op layer.setText keeps the IME owner");
+    assert_eq!(undo_steps(&s), steps, "a no-op layer.setText records no undo step");
 
     // Another property of the edited layer leaves its document alone.
     s.execute("prop.set", json!({"layer": t, "path": "transform/opacity", "value": 50})).unwrap();
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "an unrelated property keeps the IME owner");
+    assert_ime_owner(&s, owner, "an unrelated property keeps the IME owner");
 
     // Source Text of another layer is not the editor's document either.
-    s.execute("prop.set", json!({"layer": other, "path": "text/sourceText", "value": "changed"})).unwrap();
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "another layer's text keeps the IME owner");
+    set_source(&mut s, other, "changed");
+    assert_ime_owner(&s, owner, "another layer's text keeps the IME owner");
 
     // Replacing the edited layer's Source Text is a document replacement: a new IME epoch.
-    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "value": "replaced"})).unwrap();
-    assert_eq!(doc(&s, t).text, "replaced");
-    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "replacing the document changes the IME owner");
+    set_source(&mut s, t, "replaced");
+    assert_text(&s, t, "replaced");
+    assert_ime_epoch_changed(&s, owner, "replacing the document changes the IME owner");
 }
 
 #[test]
 fn a_replacing_property_write_clamps_the_selection_so_the_next_backspace_deletes() {
-    let (mut s, t) = session("abcdef");
-    s.execute("text.edit", json!({"layer": t, "caret": 6})).unwrap();
-    let owner = s.state.text_edit.as_ref().unwrap().session;
+    let (mut s, t) = editing("abcdef", 6);
+    let owner = ime_owner(&s);
 
-    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "value": "a"})).unwrap();
-    assert_eq!(doc(&s, t).text, "a");
+    set_source(&mut s, t, "a");
+    assert_text(&s, t, "a");
     assert_eq!(sel(&s), (1, 1), "the shortened document leaves the caret in range");
-    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner);
+    assert_ne!(ime_owner(&s), owner);
 
     // Backspace at the clamped caret removes the character instead of no-opping on 5..6.
     s.execute("text.delete", json!({})).unwrap();
-    assert_eq!(doc(&s, t).text, "");
+    assert_text(&s, t, "");
     assert_eq!(sel(&s), (0, 0));
 }
 
 #[test]
 fn keyframe_writes_on_source_text_replace_the_edited_document_only_when_the_cti_value_changes() {
-    let (mut s, t) = session("abc");
-    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
+    let (mut s, t) = editing("abc", 1);
     // Keying the text the CTI already shows leaves the document equal.
-    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
-    let owner = s.state.text_edit.as_ref().unwrap().session;
+    animate_source(&mut s, t);
+    let owner = ime_owner(&s);
 
-    s.execute("keys.set", json!({"layer": t, "path": "text/sourceText", "time": 0.0, "value": "abc"})).unwrap();
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "a no-op key write keeps the IME owner");
+    set_source_cti_key(&mut s, t, 0.0, "abc");
+    assert_ime_owner(&s, owner, "a no-op key write keeps the IME owner");
 
     // `keys.set` changes the key at the CTI: a document replacement.
-    s.execute("keys.set", json!({"layer": t, "path": "text/sourceText", "time": 0.0, "value": "replaced"})).unwrap();
-    assert_eq!(doc(&s, t).text, "replaced");
-    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "a changed keyframe changes the IME owner");
+    set_source_cti_key(&mut s, t, 0.0, "replaced");
+    assert_text(&s, t, "replaced");
+    assert_ime_epoch_changed(&s, owner, "a changed keyframe changes the IME owner");
 }
 
 #[test]
 fn deleting_the_cti_keyframe_first_replaces_the_document_then_the_last_key_is_a_noop() {
-    let (mut s, t) = session("abc");
-    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
-    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
-    s.execute("prop.addKey", json!({"layer": t, "path": "text/sourceText", "time": 1.0, "value": "later"})).unwrap();
-    let owner = s.state.text_edit.as_ref().unwrap().session;
+    let (mut s, t) = editing("abc", 1);
+    animate_source(&mut s, t);
+    add_source_key(&mut s, t, 1.0, "later");
+    let owner = ime_owner(&s);
     let lid = effectcraft_project::LayerId(t);
     let pr = s.active_comp().unwrap().layer(lid).unwrap().props.prop("text/sourceText").unwrap();
     let uid = pr.uid;
@@ -361,141 +448,165 @@ fn deleting_the_cti_keyframe_first_replaces_the_document_then_the_last_key_is_a_
     // the document starts a new epoch.
     s.state.selected_keys = vec![crate::KeyRef { layer: lid, prop: uid, time: times[0] }];
     assert_eq!(s.execute("keys.delete", json!({})).unwrap(), json!(1));
-    assert_eq!(doc(&s, t).text, "later");
-    let replaced = s.state.text_edit.as_ref().unwrap().session;
+    assert_text(&s, t, "later");
+    let replaced = ime_owner(&s);
     assert_ne!(replaced, owner, "deleting the CTI key changed the document");
 
     // Removing the last key turns its value into the static CTI value. That value is what the
     // CTI already showed, so the document does not change and the new owner stays.
     s.state.selected_keys = vec![crate::KeyRef { layer: lid, prop: uid, time: times[1] }];
     assert_eq!(s.execute("keys.delete", json!({})).unwrap(), json!(1));
-    assert_eq!(doc(&s, t).text, "later");
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, replaced, "removing the last key is a document no-op");
+    assert_text(&s, t, "later");
+    assert_ime_owner(&s, replaced, "removing the last key is a document no-op");
 }
 
 #[test]
 fn moving_the_cti_to_a_shorter_animated_key_clamps_and_starts_a_new_epoch() {
     let (mut s, t) = session("abcdef");
-    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
-    s.execute("prop.addKey", json!({"layer": t, "path": "text/sourceText", "time": 1.0, "value": "a"})).unwrap();
-    s.execute("text.edit", json!({"layer": t, "caret": 6})).unwrap();
-    let owner = s.state.text_edit.as_ref().unwrap().session;
+    animate_source(&mut s, t);
+    add_source_key(&mut s, t, 1.0, "a");
+    begin_edit_at(&mut s, t, 6);
+    let owner = ime_owner(&s);
 
     // The same time still shows the same document: no new epoch.
     s.execute("time.set", json!({"time": 0.0})).unwrap();
-    assert_eq!(doc(&s, t).text, "abcdef");
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "an unchanged CTI document keeps the IME owner");
+    assert_text(&s, t, "abcdef");
+    assert_ime_owner(&s, owner, "an unchanged CTI document keeps the IME owner");
 
     // The key at 1s holds shorter text: the document changes, the selection is clamped and the
     // editor gets a new epoch.
     s.execute("time.set", json!({"time": 1.0})).unwrap();
-    assert_eq!(doc(&s, t).text, "a");
+    assert_text(&s, t, "a");
     assert_eq!(sel(&s), (1, 1), "the shortened document leaves the caret in range");
-    let replaced = s.state.text_edit.as_ref().unwrap().session;
+    let replaced = ime_owner(&s);
     assert_ne!(replaced, owner, "a changed CTI document starts a new IME epoch");
 
     // Backspace at the clamped caret removes the character instead of no-opping on 5..6.
     s.execute("text.delete", json!({})).unwrap();
-    assert_eq!(doc(&s, t).text, "");
+    assert_text(&s, t, "");
     assert_eq!(sel(&s), (0, 0));
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, replaced, "typing after the replacement keeps its owner");
+    assert_ime_owner(&s, replaced, "typing after the replacement keeps its owner");
 
     // Staying at the same time after the edit is a no-op for the document too.
     s.execute("time.set", json!({"time": 1.0})).unwrap();
-    assert_eq!(doc(&s, t).text, "");
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, replaced, "a no-op time move keeps the IME owner");
+    assert_text(&s, t, "");
+    assert_ime_owner(&s, replaced, "a no-op time move keeps the IME owner");
 }
 
 #[test]
 fn sync_related_times_replaces_the_edited_document_when_it_moves_the_active_comp() {
     let (mut s, t) = session("abcdef");
-    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
-    s.execute("prop.addKey", json!({"layer": t, "path": "text/sourceText", "time": 1.0, "value": "a"})).unwrap();
+    animate_source(&mut s, t);
+    add_source_key(&mut s, t, 1.0, "a");
     let outer = s.active_comp_id().unwrap();
     let r = s.execute("layer.precompose", json!({"layers": [t], "name": "Inner", "open": true})).unwrap();
     let inner = effectcraft_project::ItemId(r["comp"].as_u64().unwrap());
     assert_eq!(s.active_comp_id(), Some(inner));
 
-    s.execute("text.edit", json!({"layer": t, "caret": 6})).unwrap();
-    let owner = s.state.text_edit.as_ref().unwrap().session;
+    begin_edit_at(&mut s, t, 6);
+    let owner = ime_owner(&s);
     s.sync_related_times(outer, effectcraft_time::Tick::from_seconds_f64(1.0));
 
-    assert_eq!(doc(&s, t).text, "a");
+    assert_text(&s, t, "a");
     assert_eq!(sel(&s), (1, 1), "the related time move clamps the selection");
-    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "the related time move changed the document");
+    assert_ime_epoch_changed(&s, owner, "the related time move changed the document");
 }
 
 #[test]
 fn applying_a_preset_that_writes_source_text_replaces_the_edited_document() {
-    let (mut s, t) = session("abc");
-    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
-    let owner = s.state.text_edit.as_ref().unwrap().session;
+    let (mut s, t) = editing("abc", 1);
+    let owner = ime_owner(&s);
     let preset = json!({
         "effectcraftAnimationPreset": 1,
         "properties": [{"path": "text/sourceText", "value": {"t": "Text", "v": {"text": "replaced"}}, "keys": []}],
     });
     s.execute("anim.applyPreset", json!({"preset": preset, "layers": [t]})).unwrap();
-    assert_eq!(doc(&s, t).text, "replaced");
-    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "a preset that replaces source text changes the IME owner");
+    assert_text(&s, t, "replaced");
+    assert_ime_epoch_changed(&s, owner, "a preset that replaces source text changes the IME owner");
 }
 
 #[test]
 fn a_failed_property_write_keeps_the_edited_document_and_its_owner() {
-    let (mut s, t) = session("abc");
-    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
-    let owner = s.state.text_edit.as_ref().unwrap().session;
-    let steps = s.history.undo.len();
+    let (mut s, t) = editing("abc", 1);
+    let owner = ime_owner(&s);
+    let steps = undo_steps(&s);
 
     // null cannot coerce to a Text value: the edit fails before anything is committed.
     assert!(s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "value": null})).is_err());
-    assert_eq!(doc(&s, t).text, "abc");
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "a failed write keeps the IME owner");
-    assert_eq!(s.history.undo.len(), steps, "a failed write records no undo step");
+    assert_text(&s, t, "abc");
+    assert_ime_owner(&s, owner, "a failed write keeps the IME owner");
+    assert_eq!(undo_steps(&s), steps, "a failed write records no undo step");
 }
 
 #[test]
 fn property_writes_off_the_cti_keep_the_owner_until_they_change_the_cti_document() {
-    let (mut s, t) = session("abc");
-    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
-    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
-    s.execute("prop.addKey", json!({"layer": t, "path": "text/sourceText", "time": 1.0, "value": "later"})).unwrap();
-    let owner = s.state.text_edit.as_ref().unwrap().session;
+    let (mut s, t) = editing("abc", 1);
+    animate_source(&mut s, t);
+    add_source_key(&mut s, t, 1.0, "later");
+    let owner = ime_owner(&s);
 
     // Writing a key at 1s leaves the CTI (0s) value as it was.
-    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "time": 1.0, "value": "changed"})).unwrap();
-    assert_eq!(doc(&s, t).text, "abc");
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "an off-CTI write keeps the IME owner");
+    set_source_key(&mut s, t, 1.0, "changed");
+    assert_text(&s, t, "abc");
+    assert_ime_owner(&s, owner, "an off-CTI write keeps the IME owner");
 
     // Writing the CTI value itself replaces the document.
-    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "value": "cti"})).unwrap();
-    assert_eq!(doc(&s, t).text, "cti");
-    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "a CTI write changes the IME owner");
+    set_source(&mut s, t, "cti");
+    assert_text(&s, t, "cti");
+    assert_ime_epoch_changed(&s, owner, "a CTI write changes the IME owner");
 }
 
 #[test]
 fn unrelated_project_cleanup_keeps_the_ime_owner_but_replacement_changes_it() {
-    let (mut s, t) = session("abc");
-    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
-    let owner = s.state.text_edit.as_ref().unwrap().session;
+    let (mut s, t) = editing("abc", 1);
+    let owner = ime_owner(&s);
 
     // file.removeUnusedFootage calls sanitize_state while the edited document is untouched.
     s.execute("file.importSolid", json!({"name": "Unused"})).unwrap();
     let removed = s.execute("file.removeUnusedFootage", json!({})).unwrap();
     assert_eq!(removed["removed"], json!(1), "the unused solid was actually removed");
-    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "unrelated cleanup keeps the IME owner");
+    assert_ime_owner(&s, owner, "unrelated cleanup keeps the IME owner");
 
     // Replacing the Source Text is a document replacement: a new owner.
-    s.execute("layer.setText", json!({"layer": t, "text": "replaced"})).unwrap();
-    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "replacing the document changes the owner");
+    replace_text(&mut s, t, "replaced");
+    assert_ime_epoch_changed(&s, owner, "replacing the document changes the owner");
 }
 
 #[test]
 fn ime_session_does_not_cross_a_composition_switch() {
-    let (mut s, t) = session("abc");
-    s.execute("text.edit", json!({"layer": t})).unwrap();
-    let other = s.execute("comp.new", json!({"name": "Other", "width": 320, "height": 180, "duration": 2})).unwrap()["comp"].as_u64().unwrap();
+    let (mut s, _) = editing_all("abc");
+    let other = new_other_comp(&mut s);
     s.execute("comp.open", json!({"comp": other})).unwrap();
     assert!(s.state.text_edit.is_none(), "the old comp's editor is not reused in another comp");
+}
+
+#[test]
+fn removing_the_active_comp_does_not_retarget_its_text_editor() {
+    for replacement in [false, true] {
+        let (mut s, t) = session("original");
+        let original = s.active_comp_id().unwrap();
+        let layer = s.active_comp().unwrap().layer(effectcraft_project::LayerId(t)).unwrap().clone();
+        let other = new_other_comp(&mut s);
+        let other_id = effectcraft_project::ItemId(other);
+        std::sync::Arc::make_mut(&mut s.project).comp_mut(other_id).unwrap().layers.push(layer);
+        s.execute("comp.open", json!({"comp": other})).unwrap();
+        s.execute("comp.open", json!({"comp": original.0})).unwrap();
+        begin_edit_at(&mut s, t, 1);
+        assert!(s.state.text_edit.is_some());
+
+        // Reproduce cleanup after a project replacement, bypassing Session::edit's earlier
+        // document guard so this specifically exercises sanitize_state's fallback-comp branch.
+        std::sync::Arc::make_mut(&mut s.project).items.remove(&original);
+        if replacement {
+            s.sanitize_after_replacement();
+        } else {
+            s.sanitize_state();
+        }
+        assert_eq!(s.active_comp_id(), Some(other_id));
+        assert!(s.state.text_edit.is_none(), "the same-numbered layer belongs to a different comp");
+        assert!(s.execute("text.insert", json!({"text": "wrong document"})).is_err());
+        assert_eq!(doc(&s, t).text, "original", "the fallback comp was not edited");
+    }
 }
 
 #[test]
@@ -555,31 +666,46 @@ fn fonts_lists_bundled_and_installed_families() {
     assert_eq!(crate::font_styles("No Such Family").len(), 5);
 }
 
-/// A font file of just `name` (the family, Regular) and an `fvar` table with one axis pinned at
-/// 400 (so the helpers that look for an installed font with a real axis range never pick it).
-fn pinned_variable_font(family: &str) -> Vec<u8> {
-    let u16s = |v: &[u16]| -> Vec<u8> { v.iter().flat_map(|x| x.to_be_bytes()).collect() };
-    let strings: Vec<Vec<u8>> = [family, "Regular"].iter().map(|s| s.encode_utf16().flat_map(|u| u.to_be_bytes()).collect()).collect();
-    let mut name = u16s(&[0, 2, 30]);
+/// A big-endian `u16` array, as sfnt tables store them.
+fn u16s(v: &[u16]) -> Vec<u8> {
+    v.iter().flat_map(|x| x.to_be_bytes()).collect()
+}
+
+/// A `name` table with one Windows/Unicode English record per `(id, text)`.
+fn name_table(strings: &[(u16, String)]) -> Vec<u8> {
+    let enc: Vec<(u16, Vec<u8>)> = strings.iter().map(|(id, s)| (*id, s.encode_utf16().flat_map(|u| u.to_be_bytes()).collect())).collect();
+    let mut name = u16s(&[0, enc.len() as u16, 6 + 12 * enc.len() as u16]);
     let mut off = 0;
-    for (id, st) in strings.iter().enumerate() {
-        name.extend(u16s(&[3, 1, 0x409, id as u16 + 1, st.len() as u16, off]));
+    for (id, st) in &enc {
+        name.extend(u16s(&[3, 1, 0x409, *id, st.len() as u16, off]));
         off += st.len() as u16;
     }
-    strings.iter().for_each(|st| name.extend(st));
-    let mut fvar = u16s(&[1, 0, 16, 2, 1, 20, 0, 8]);
-    fvar.extend(b"wght".iter().copied().chain(u16s(&[0x190, 0, 0x190, 0, 0x190, 0, 0, 256])));
-    let mut out = u16s(&[1, 0, 2, 0, 0, 0]);
+    enc.iter().for_each(|(_, st)| name.extend(st));
+    name
+}
+
+/// A single-face font with `tables` in order (zero checksums, offsets after the directory).
+fn sfnt(tables: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
+    let mut out = u16s(&[1, 0, tables.len() as u16, 0, 0, 0]);
     let mut body: Vec<u8> = vec![];
-    for (tag, data) in [(b"fvar", fvar), (b"name", name)] {
-        out.extend(tag);
+    for (tag, data) in tables {
+        out.extend(*tag);
         out.extend([0u8; 4]);
-        out.extend(((12 + 32 + body.len()) as u32).to_be_bytes());
+        out.extend(((12 + 16 * tables.len() + body.len()) as u32).to_be_bytes());
         out.extend((data.len() as u32).to_be_bytes());
         body.extend(data);
     }
     out.extend(body);
     out
+}
+
+/// A font file of just `name` (the family, Regular) and an `fvar` table with one axis pinned at
+/// 400 (so the helpers that look for an installed font with a real axis range never pick it).
+fn pinned_variable_font(family: &str) -> Vec<u8> {
+    let mut fvar = u16s(&[1, 0, 16, 2, 1, 20, 0, 8]);
+    fvar.extend(b"wght".iter().copied().chain(u16s(&[0x190, 0, 0x190, 0, 0x190, 0, 0, 256])));
+    let name = name_table(&[(1, family.to_owned()), (2, "Regular".to_owned())]);
+    sfnt(&[(b"fvar", fvar), (b"name", name)])
 }
 
 /// The font menu's Variable Fonts filter (After Effects 26.3): `text.fonts {variable: true}`
@@ -616,7 +742,6 @@ fn fonts_filter_variable_families() {
 /// `Light`) and the named `instances` (style, `wght`), each with a PostScript name
 /// `<family without spaces>-<style without spaces>`.
 fn instanced_variable_font(family: &str, instances: &[(&str, f32)]) -> Vec<u8> {
-    let u16s = |v: &[u16]| -> Vec<u8> { v.iter().flat_map(|x| x.to_be_bytes()).collect() };
     let squash = |s: &str| s.chars().filter(char::is_ascii_alphanumeric).collect::<String>();
     let mut strings: Vec<(u16, String)> = vec![(1, family.into()), (2, "Light".into())];
     let mut fvar = u16s(&[1, 0, 16, 2, 1, 20, instances.len() as u16, 10]);
@@ -629,25 +754,7 @@ fn instanced_variable_font(family: &str, instances: &[(&str, f32)]) -> Vec<u8> {
         fvar.extend(((w * 65536.0) as i32).to_be_bytes());
         fvar.extend(u16s(&[id + 1]));
     }
-    let enc: Vec<(u16, Vec<u8>)> = strings.iter().map(|(id, s)| (*id, s.encode_utf16().flat_map(|u| u.to_be_bytes()).collect())).collect();
-    let mut name = u16s(&[0, enc.len() as u16, 6 + 12 * enc.len() as u16]);
-    let mut off = 0;
-    for (id, st) in &enc {
-        name.extend(u16s(&[3, 1, 0x409, *id, st.len() as u16, off]));
-        off += st.len() as u16;
-    }
-    enc.iter().for_each(|(_, st)| name.extend(st));
-    let mut out = u16s(&[1, 0, 2, 0, 0, 0]);
-    let mut body: Vec<u8> = vec![];
-    for (tag, data) in [(b"fvar", fvar), (b"name", name)] {
-        out.extend(tag);
-        out.extend([0u8; 4]);
-        out.extend(((12 + 32 + body.len()) as u32).to_be_bytes());
-        out.extend((data.len() as u32).to_be_bytes());
-        body.extend(data);
-    }
-    out.extend(body);
-    out
+    sfnt(&[(b"fvar", fvar), (b"name", name_table(&strings))])
 }
 
 /// #1563: a variable font's named instances are styles of its family in `text.fonts`, and a
@@ -693,38 +800,35 @@ fn set_text_schema_accepts_every_opentype_key_and_requires_none() {
 /// a byte count that ends inside a UTF-8 character leaves that character.
 #[test]
 fn ime_replacement_keeps_the_selection_and_never_splits_a_character() {
-    let (mut s, t) = session("abcdef");
-    s.execute("text.edit", json!({"layer": t})).unwrap();
-    s.execute("text.setSelection", json!({"start": 1, "end": 4})).unwrap();
+    let (mut s, t) = editing_all("abcdef");
+    select(&mut s, 1, 4);
     // One character before "bcd" and everything after it: the selection survives for the commit.
     s.execute("text.deleteSurrounding", json!({"before": 1, "after": 99, "merge": "typing-0"})).unwrap();
-    assert_eq!(doc(&s, t).text, "bcd");
+    assert_text(&s, t, "bcd");
     assert_eq!(sel(&s), (0, 3), "the selection is kept for the commit that follows");
     s.execute("text.insert", json!({"text": "X", "merge": "typing-0"})).unwrap();
-    assert_eq!(doc(&s, t).text, "X");
+    assert_text(&s, t, "X");
     assert_eq!(sel(&s), (1, 1));
     s.execute("edit.undo", json!({})).unwrap();
     assert_eq!(doc(&s, t).text, "abcdef", "the surrounding delete and its commit are one undo step");
     // An empty count is a no-op (deletion-only batches, empty commits), never an undo step.
     s.execute("edit.redo", json!({})).unwrap();
-    s.execute("text.setSelection", json!({"start": 0, "end": 1})).unwrap();
+    select(&mut s, 0, 1);
     s.execute("text.deleteSurrounding", json!({"before": 0, "after": 0})).unwrap();
-    assert_eq!(doc(&s, t).text, "X");
+    assert_text(&s, t, "X");
 
     // Byte counts end inside a character: it stays whole (never a split UTF-8 sequence).
-    let (mut s, t) = session("A😀B");
-    s.execute("text.edit", json!({"layer": t})).unwrap();
-    s.execute("text.setSelection", json!({"start": 3, "end": 3})).unwrap();
+    let (mut s, t) = editing_all("A😀B");
+    select(&mut s, 3, 3);
     s.execute("text.deleteSurrounding", json!({"before": 2, "after": 0, "bytes": true})).unwrap();
     assert_eq!(doc(&s, t).text, "A😀", "B is whole, the emoji only partly covered, so both are not one range");
-    s.execute("text.setSelection", json!({"start": 2, "end": 2})).unwrap();
+    select(&mut s, 2, 2);
     s.execute("text.deleteSurrounding", json!({"before": 4, "after": 0, "bytes": true})).unwrap();
     assert_eq!(doc(&s, t).text, "A", "four bytes cover the whole emoji");
 
     // A combining mark is one character of two bytes: one byte of it removes nothing.
-    let (mut s, t) = session("e\u{301}");
-    s.execute("text.edit", json!({"layer": t})).unwrap();
-    s.execute("text.setSelection", json!({"start": 2, "end": 2})).unwrap();
+    let (mut s, t) = editing_all("e\u{301}");
+    select(&mut s, 2, 2);
     s.execute("text.deleteSurrounding", json!({"before": 1, "after": 0, "bytes": true})).unwrap();
     assert_eq!(doc(&s, t).text, "e\u{301}", "a partial combining mark stays");
     s.execute("text.deleteSurrounding", json!({"before": 2, "after": 0, "bytes": true})).unwrap();
@@ -736,9 +840,8 @@ fn ime_replacement_keeps_the_selection_and_never_splits_a_character() {
 /// answer for a selection that cannot be represented.
 #[test]
 fn ime_surrounding_maps_characters_to_bytes_and_preserves_direction() {
-    let (mut s, t) = session("café😀");
-    s.execute("text.edit", json!({"layer": t})).unwrap();
-    s.execute("text.setSelection", json!({"anchor": 2, "caret": 5})).unwrap();
+    let (mut s, _) = editing_all("café😀");
+    select_anchor(&mut s, 2, 5);
     let w = ime_surrounding(&s).expect("an available document");
     assert_eq!(w.text, "café😀");
     assert_eq!((w.cursor, w.anchor), (9, 2), "the caret is six characters in, after the emoji; the anchor stays at byte 2");
@@ -746,14 +849,13 @@ fn ime_surrounding_maps_characters_to_bytes_and_preserves_direction() {
     assert_eq!(&w.text[..w.anchor], "ca");
 
     // Reversed: the caret stays the primary end and the anchor the other one.
-    s.execute("text.setSelection", json!({"anchor": 5, "caret": 2})).unwrap();
+    select_anchor(&mut s, 5, 2);
     let reversed = ime_surrounding(&s).expect("an available document");
     assert_eq!((reversed.cursor, reversed.anchor), (2, 9), "cursor > anchor is preserved after the conversion");
     assert_eq!(&reversed.text[reversed.cursor..reversed.anchor], "fé😀");
 
     // An available empty document is not the unavailable state.
-    let (mut s, t) = session("");
-    s.execute("text.edit", json!({"layer": t})).unwrap();
+    let (s, _) = editing_all("");
     let empty = ime_surrounding(&s).expect("empty text is available");
     assert_eq!((empty.text.as_str(), empty.cursor, empty.anchor), ("", 0, 0));
 
@@ -766,8 +868,7 @@ fn ime_surrounding_maps_characters_to_bytes_and_preserves_direction() {
 fn ime_surrounding_is_bounded_and_refuses_a_too_wide_selection() {
     // A long line: the query copies only a window around the caret, never the document.
     let text = "a".repeat(20_000);
-    let (mut s, t) = session(&text);
-    s.execute("text.edit", json!({"layer": t, "caret": 10_000})).unwrap();
+    let (mut s, _) = editing(&text, 10_000);
     let w = ime_surrounding(&s).expect("a collapsed caret fits");
     assert!(w.text.len() <= MAX_IME_TEXT_BYTES, "the payload is bounded");
     assert!(w.text.len() > 1000, "the caret keeps a useful amount of context");
@@ -775,13 +876,12 @@ fn ime_surrounding_is_bounded_and_refuses_a_too_wide_selection() {
     assert_eq!(w.cursor, w.anchor);
 
     // A selection wider than the protocol limit is unavailable, not a truncated one.
-    s.execute("text.setSelection", json!({"start": 0, "end": 20_000})).unwrap();
+    select(&mut s, 0, 20_000);
     assert!(ime_surrounding(&s).is_none(), "a too-wide selection is unavailable");
 
     // Multi-byte text at the window boundary is never split, and offsets stay on boundaries.
     let text = "é".repeat(5_000);
-    let (mut s, t) = session(&text);
-    s.execute("text.edit", json!({"layer": t, "caret": 2_500})).unwrap();
+    let (s, _) = editing(&text, 2_500);
     let w = ime_surrounding(&s).expect("a collapsed caret fits");
     assert!(w.text.len() <= MAX_IME_TEXT_BYTES);
     assert!(w.text.is_char_boundary(w.cursor));
@@ -793,19 +893,18 @@ fn ime_surrounding_is_bounded_and_refuses_a_too_wide_selection() {
 /// either side stay whole.
 #[test]
 fn ime_byte_deletion_keeps_a_reversed_selection_direction() {
-    let (mut s, t) = session("😀ab😀");
-    s.execute("text.edit", json!({"layer": t})).unwrap();
-    s.execute("text.setSelection", json!({"anchor": 3, "caret": 1})).unwrap();
+    let (mut s, t) = editing_all("😀ab😀");
+    select_anchor(&mut s, 3, 1);
     let (anchor, caret) = sel(&s);
     assert_eq!((anchor, caret), (3, 1), "reversed before the replacement");
 
     // Three bytes cover only part of either four-byte emoji: neither is split or removed.
     s.execute("text.deleteSurrounding", json!({"before": 3, "after": 3, "bytes": true})).unwrap();
-    assert_eq!(doc(&s, t).text, "😀ab😀");
+    assert_text(&s, t, "😀ab😀");
 
     // Four bytes cover each whole emoji: the selection text stays, shifted, still reversed.
     s.execute("text.deleteSurrounding", json!({"before": 4, "after": 4, "bytes": true})).unwrap();
-    assert_eq!(doc(&s, t).text, "ab");
+    assert_text(&s, t, "ab");
     assert_eq!(sel(&s), (2, 0), "the anchor stays after the caret");
     let w = ime_surrounding(&s).expect("available");
     assert_eq!((w.text.as_str(), w.cursor, w.anchor), ("ab", 0, 2), "the outgoing offsets keep the direction");
@@ -813,8 +912,7 @@ fn ime_byte_deletion_keeps_a_reversed_selection_direction() {
 
 #[test]
 fn deselect_all_ends_the_open_edit() {
-    let (mut s, t) = session("Hello");
-    s.execute("text.edit", json!({"layer": t, "caret": 5})).unwrap();
+    let (mut s, t) = editing("Hello", 5);
     s.execute("text.insert", json!({"text": "!"})).unwrap();
     assert_eq!(doc(&s, t).text, "Hello!");
     s.execute("edit.deselectAll", json!({})).unwrap();

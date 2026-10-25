@@ -8,6 +8,11 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
 
+// The pointer/geometry helpers are shared with the sibling menu and long-tail test modules:
+// `rect`, `click_at`, `move_to` and press-and-hold (`hold`) live in ui_menus, `drag` in ui_tail.
+use super::ui_menus::{click_at, move_to, press as hold, rect};
+use super::ui_tail::drag;
+
 /// Open the demo project in a UI test harness with the requested window size.
 fn harness(w: f32, h: f32) -> Harness<'static, EffectcraftApp> {
     let mut s = Session::default();
@@ -15,20 +20,6 @@ fn harness(w: f32, h: f32) -> Harness<'static, EffectcraftApp> {
     let mut h = Harness::builder().with_size(vec2(w, h)).build_eframe(|_| EffectcraftApp::new(s));
     h.run_steps(3);
     h
-}
-
-/// Return a registered widget's rectangle so UI tests can inspect its layout.
-fn rect(h: &Harness<'_, EffectcraftApp>, id: &str) -> Rect {
-    let e = h.state().auto.find(id).unwrap_or_else(|| panic!("no {id}"));
-    Rect::from_min_size(pos2(e.rect[0], e.rect[1]), vec2(e.rect[2], e.rect[3]))
-}
-
-fn click_at(h: &mut Harness<'_, EffectcraftApp>, p: Pos2) {
-    h.input_mut().events.push(Event::PointerMoved(p));
-    h.input_mut().events.push(Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
-    h.step();
-    h.input_mut().events.push(Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
-    h.run_steps(2);
 }
 
 fn wheel(h: &mut Harness<'_, EffectcraftApp>, at: Pos2, dy: f32) {
@@ -41,19 +32,6 @@ fn wheel(h: &mut Harness<'_, EffectcraftApp>, at: Pos2, dy: f32) {
         source: egui::MouseWheelSource::Wheel,
     });
     h.run_steps(20);
-}
-
-/// Press the primary button at `p` and keep it down (press-and-browse, as on a menu title).
-fn hold(h: &mut Harness<'_, EffectcraftApp>, p: Pos2) {
-    h.input_mut().events.push(Event::PointerMoved(p));
-    h.input_mut().events.push(Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
-    h.run_steps(2);
-}
-
-/// Move the pointer to `p`, keeping whatever button is held.
-fn move_to(h: &mut Harness<'_, EffectcraftApp>, p: Pos2) {
-    h.input_mut().events.push(Event::PointerMoved(p));
-    h.run_steps(2);
 }
 
 /// The open menu popup's rect (frame included), from egui's area memory: the only tall area up.
@@ -89,17 +67,29 @@ fn a_menu_taller_than_the_window_scrolls() {
     assert_eq!(h.state().dialog, Some(effectcraft_ui_egui::Dialog::Shortcuts), "the entry takes the click");
 }
 
+/// Open Edit in a window shorter than the menu (holding or clicking its title) and return the
+/// last entry's rect before any scroll, plus the open popup's rect. `opened` is the failure
+/// message when the menu did not open.
+fn open_tall_edit(h: &mut Harness<'_, EffectcraftApp>, held: bool, opened: &str) -> (Rect, Rect) {
+    let edit = rect(h, "menu.Edit");
+    if held {
+        hold(h, edit.center());
+    } else {
+        click_at(h, edit.center());
+    }
+    let before = h.query_by_label_contains("Keyboard Shortcuts").expect(opened).rect();
+    assert!(before.max.y > 520.0, "Edit is taller than the window ({before:?})");
+    let menu = open_popup(h);
+    (before, menu)
+}
+
 /// With the title still held down (press-and-browse), resting the pointer against the bottom
 /// edge of a menu too tall for the window scrolls it from there — a crawl, then a run, as native
 /// menus do — so the long list can be walked with no wheel.
 #[test]
 fn holding_the_title_scrolls_the_menu_from_its_bottom_edge() {
     let mut h = harness(1200.0, 520.0);
-    let edit = rect(&h, "menu.Edit");
-    hold(&mut h, edit.center());
-    let before = h.query_by_label_contains("Keyboard Shortcuts").expect("the Edit menu opens on the press").rect();
-    assert!(before.max.y > 520.0, "Edit is taller than the window ({before:?})");
-    let menu = open_popup(&h);
+    let (before, menu) = open_tall_edit(&mut h, true, "the Edit menu opens on the press");
     // Creeping down the edge: the 18 pt band above the menu's inner bottom lies at one of these
     // positions, whatever the frame's margin (they are 6 pt apart).
     let mut walked = false;
@@ -121,11 +111,7 @@ fn holding_the_title_scrolls_the_menu_from_its_bottom_edge() {
 #[test]
 fn without_the_hold_the_edge_does_not_scroll_the_menu() {
     let mut h = harness(1200.0, 520.0);
-    let edit = rect(&h, "menu.Edit");
-    click_at(&mut h, edit.center());
-    let before = h.query_by_label_contains("Keyboard Shortcuts").expect("the Edit menu is open").rect();
-    assert!(before.max.y > 520.0, "Edit is taller than the window ({before:?})");
-    let menu = open_popup(&h);
+    let (before, menu) = open_tall_edit(&mut h, false, "the Edit menu is open");
     for step in 0..5 {
         move_to(&mut h, pos2(menu.center().x, menu.max.y - 6.0 - 6.0 * step as f32));
         h.run_steps(8);
@@ -279,18 +265,6 @@ fn menu_edge_crawl_is_bounded_stops_and_keeps_wheel_and_menu_state_independent()
     move_to(&mut h, pos2(x, bar.max.y - 6.0));
     h.run_steps(20);
     assert_eq!(h.query_by_label_contains("Open Project").unwrap().rect(), released, "without the hold, the edge does not restart a crawl");
-}
-
-fn drag(h: &mut Harness<'_, EffectcraftApp>, from: Pos2, to: Pos2) {
-    h.input_mut().events.push(Event::PointerMoved(from));
-    h.input_mut().events.push(Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
-    h.step();
-    for i in 1..=8 {
-        h.input_mut().events.push(Event::PointerMoved(from + (to - from) * (i as f32 / 8.0)));
-        h.step();
-    }
-    h.input_mut().events.push(Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
-    h.run_steps(2);
 }
 
 /// A scroll bar's "scroll/max" automation label.
