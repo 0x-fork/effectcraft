@@ -288,6 +288,8 @@ fn composition_tabs_and_scrolling_preview() {
     let mut s = Session::default();
     s.execute("file.openDemoProject", json!({})).unwrap();
     let mut h = Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_eframe(|_| EffectcraftApp::new(s));
+    // A short Preview panel scrolls its controls (stacked panels share the column by height).
+    h.state_mut().apply_dock(craft_ui::docking::Action::ResizeStack { panel: PanelKind::Properties, height: Some(650.0) }).unwrap();
     h.run_steps(4);
     rect(&h, "panel.tab.Timeline.close");
     rect(&h, "preview.scroll");

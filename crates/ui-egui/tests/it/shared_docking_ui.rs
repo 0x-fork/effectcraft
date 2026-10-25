@@ -128,13 +128,14 @@ fn pointer_drop_merges_floats_and_redocks_without_project_changes() {
     drag(&mut h, from, pos2(700.0, 400.0), Modifiers::COMMAND);
     assert_eq!(floating(h.state()).len(), 1);
     assert!(h.state().ui.dock.is_floating(PanelKind::Info));
-    assert_eq!(h.get_by_label("Resize floating panel").accesskit_node().role(), egui::accesskit::Role::Button);
+    let grips: Vec<_> = h.query_all_by_label("Resize panel window").collect();
+    assert!(!grips.is_empty() && grips.iter().all(|grip| grip.accesskit_node().role() == egui::accesskit::Role::Button));
     // Its corner resizes it and its title bar moves it.
     let original = floating(h.state())[0].rect;
     let grip = rect(&h, "panel.float.0.resize").center();
-    drag(&mut h, grip, grip + vec2(36.0, 24.0), Modifiers::NONE);
+    drag(&mut h, grip, grip - vec2(36.0, 24.0), Modifiers::NONE);
     let resized = floating(h.state())[0].rect;
-    assert!(resized[2] > original[2] + 25.0 && resized[3] > original[3] + 15.0, "{original:?} -> {resized:?}");
+    assert!(resized[2] < original[2] - 25.0 && resized[3] < original[3] - 15.0, "{original:?} -> {resized:?}");
     let bar = rect(&h, "panel.float.0.move");
     drag(&mut h, bar.center(), bar.center() - vec2(24.0, 18.0), Modifiers::NONE);
     let moved = floating(h.state())[0].rect;
@@ -305,10 +306,13 @@ fn stacked_panels_resize_by_pointer_without_changing_closed_entries() {
         dock::docked(dock::stack(&[(PanelKind::Preview, true, Some(100.0)), (PanelKind::Properties, true, None), (PanelKind::Align, false, Some(77.0))]));
     h.run_steps(3);
     let project = h.state().session.project.clone();
+    let before = rect(&h, "panel.Preview").height();
     let from = rect(&h, "dock.gutter.s0").center();
     drag(&mut h, from, from + vec2(0.0, 16.0), Modifiers::NONE);
+    let after = rect(&h, "panel.Preview").height();
+    assert!((after - before - 16.0).abs() < 2.0, "{before} -> {after}");
     let Some(Node::Stack { entries }) = &h.state().ui.dock.layout.root else { panic!("stack lost") };
-    assert!(entries[0].height.unwrap_or_default() > 110.0, "{entries:?}");
+    assert!(entries[0].height.unwrap_or_default() > 100.0, "{entries:?}");
     assert_eq!(entries[2], StackEntry { panel: PanelKind::Align, open: false, height: Some(77.0) });
     assert!(std::sync::Arc::ptr_eq(&project, &h.state().session.project));
 }

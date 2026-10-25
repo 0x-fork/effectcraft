@@ -1,10 +1,11 @@
 //! Shared pane resizing in the full application, including application shortcut ownership.
 
+use craft_ui::docking::{Divider, DockArea, Hit};
 use effectcraft_engine::Session;
 use effectcraft_ui_egui::EffectcraftApp;
 use effectcraft_ui_egui::dock::{self, Node, PanelKind, SplitSize};
 use effectcraft_ui_egui::theme::ThemeKind;
-use egui::{Event, Id, Key, Modifiers, PointerButton, Rect, pos2, vec2};
+use egui::{Event, Key, Modifiers, PointerButton, Rect, pos2, vec2};
 use egui_kittest::Harness;
 use serde_json::json;
 
@@ -50,7 +51,7 @@ fn focused_dock_resize_owns_arrows_and_keeps_pointer_dragging() {
     h.run_steps(3);
     let before_project = h.state().session.project.clone();
     let before_times = h.state().session.state.times.clone();
-    let id = Id::new(("dock-gutter", String::new()));
+    let id = DockArea::<PanelKind>::hit_id(effectcraft_ui_egui::dock_ui::area_id(), &Hit::Divider(Divider::Split(Vec::new())));
     h.ctx.memory_mut(|memory| memory.request_focus(id));
     h.run_steps(2);
     assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(id));

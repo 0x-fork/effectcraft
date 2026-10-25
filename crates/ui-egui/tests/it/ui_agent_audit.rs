@@ -96,6 +96,8 @@ fn covered(w: Rect, elements: &[Rect]) -> bool {
 /// (panel, widget rect, label) of every interactive widget no automation element covers, for
 /// one panel shown maximized.
 fn gaps_of(h: &mut Harness<'_, EffectcraftApp>, p: PanelKind) -> Vec<String> {
+    // Docked alone: maximizing a stacked panel maximizes its whole stack.
+    h.state_mut().ui.dock = effectcraft_ui_egui::dock::docked(effectcraft_ui_egui::dock::tabs(&[p], 0));
     h.state_mut().show_panel(p);
     h.state_mut().ui.maximized = Some(p);
     h.run_steps(4);

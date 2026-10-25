@@ -67,7 +67,7 @@ fn opening_a_comp_brings_up_a_closed_composition_panel() {
     assert_eq!(h.state().session.active_comp_id(), Some(ItemId(other)));
     let dock = &h.state().ui.dock;
     assert!(dock.is_visible(PanelKind::Composition), "the Composition panel is back and in front");
-    assert_eq!(group_of(dock, PanelKind::Composition), Some(vec![PanelKind::Layer, PanelKind::Composition]), "back in the centre");
+    assert_eq!(group_of(dock, PanelKind::Composition), Some(vec![PanelKind::Composition, PanelKind::Layer]), "back in the centre");
     assert!(h.state().auto.elements.iter().any(|e| e.id == "panel.Composition"), "the Composition panel is drawn");
 
     // Open Composition (the Project panel's context menu) with the panel closed again.
@@ -75,12 +75,12 @@ fn opening_a_comp_brings_up_a_closed_composition_panel() {
     invoke(&mut h, "comp.open", json!({"comp": main}));
     assert_eq!(h.state().session.active_comp_id(), Some(ItemId(main)));
     assert!(h.state().ui.dock.is_visible(PanelKind::Composition));
-    assert_eq!(group_of(&h.state().ui.dock, PanelKind::Composition), Some(vec![PanelKind::Layer, PanelKind::Composition]));
+    assert_eq!(group_of(&h.state().ui.dock, PanelKind::Composition), Some(vec![PanelKind::Composition, PanelKind::Layer]));
 
     // Window ▸ Composition reopens it in the centre too (not beside Effects & Presets).
     invoke(&mut h, "window.closePanel", json!({"panel": "Composition"}));
     invoke(&mut h, "window.panel", json!({"panel": "Composition"}));
-    assert_eq!(group_of(&h.state().ui.dock, PanelKind::Composition), Some(vec![PanelKind::Layer, PanelKind::Composition]));
+    assert_eq!(group_of(&h.state().ui.dock, PanelKind::Composition), Some(vec![PanelKind::Composition, PanelKind::Layer]));
     assert!(h.state().ui.dock.is_visible(PanelKind::Composition));
 }
 

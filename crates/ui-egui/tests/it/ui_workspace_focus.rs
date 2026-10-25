@@ -11,6 +11,11 @@ use egui::{Event, Id, Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use serde_json::json;
 
+/// The egui id of panel `p`'s dock tab.
+fn tab_id(p: PanelKind) -> Id {
+    craft_ui::docking::DockArea::<PanelKind>::hit_id(effectcraft_ui_egui::dock_ui::area_id(), &craft_ui::docking::Hit::Tab(p))
+}
+
 #[test]
 fn named_and_current_workspaces_survive_frontend_restart() {
     let store = Arc::new(MemoryConfig::default());
@@ -176,9 +181,9 @@ fn tab_traversal_activates_an_inactive_dock_tab_without_editing_the_project() {
     h.run_steps(3);
     assert!(h.state().auto.find("panel.tab.EffectControls").is_some(), "the inactive tab must be visible in this fixture");
     let before = h.state().ui.dock.clone();
-    let target = Id::new(("tab", "aaa".to_string(), 1usize));
+    let target = tab_id(PanelKind::EffectControls);
     let mut tabs = 0;
-    for _ in 0..80 {
+    for _ in 0..200 {
         key(&mut h, Key::Tab, Modifiers::NONE);
         tabs += 1;
         if h.ctx.memory(|m| m.focused()) == Some(target) {
@@ -188,6 +193,15 @@ fn tab_traversal_activates_an_inactive_dock_tab_without_editing_the_project() {
     assert_eq!(h.ctx.memory(|m| m.focused()), Some(target));
     println!("Tab presses from no focus to Effect Controls: {tabs}");
     assert_eq!(h.state().ui.dock, before, "traversal alone must not activate a tab");
+    // craft-ui outlines the keyboard-focused tab, inset 2 pt, in the dock's accent (EffectCraft's
+    // focus colour).
+    let response = h.ctx.read_response(target).unwrap();
+    assert!(
+        h.output().shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Rect(r) if r.rect == response.rect.shrink(2.0) && r.stroke.color == h.state().tokens.focus && r.stroke.width > 0.0)
+        }),
+        "the dock tab must visibly show keyboard focus"
+    );
     key(&mut h, Key::Space, Modifiers::NONE);
     let mut activated = before;
     activated.apply(craft_ui::docking::Action::Activate { panel: PanelKind::EffectControls }, dock::permissions).unwrap();
@@ -195,17 +209,10 @@ fn tab_traversal_activates_an_inactive_dock_tab_without_editing_the_project() {
     assert_eq!(h.state().ui.focused, PanelKind::EffectControls);
     assert!(!h.state().playback.playing);
     assert!(Arc::ptr_eq(&h.state().session.project, &project));
-    let response = h.ctx.read_response(target).unwrap();
-    assert!(
-        h.output().shapes.iter().any(|shape| {
-            matches!(&shape.shape, egui::Shape::Rect(r) if r.rect == response.rect.shrink(1.0) && r.stroke.color == h.state().tokens.text && r.stroke.width > 0.0)
-        }),
-        "the active dock tab must visibly retain keyboard focus"
-    );
     let inspected = effectcraft_ui_egui::control::inspect(h.state(), &h.ctx);
     assert_eq!(inspected["keyboardFocus"]["automationId"], "panel.tab.EffectControls");
     key(&mut h, Key::Tab, Modifiers::SHIFT);
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(Id::new(("tab", "aaa".to_string(), 0usize))));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(tab_id(PanelKind::Project)));
     key(&mut h, Key::Enter, Modifiers::NONE);
     assert_eq!(h.state().ui.focused, PanelKind::Project);
     assert!(!h.state().playback.playing);
@@ -284,8 +291,8 @@ fn control_root_divider_drag_after_toolbar_and_dock_tab_keyboard_activation() {
     d.ok("ui.click", json!({"id":"tools.Selection"}), true);
     // The toolbar can grow as upstream adds controls. Traverse to the actual response
     // identity rather than assuming a fixed number of focus stops.
-    let target = Id::new(("tab", "aaa".to_string(), 1usize));
-    for tabs in 1..=100 {
+    let target = tab_id(PanelKind::EffectControls);
+    for tabs in 1..=200 {
         d.ok("ui.key", json!({"key":"Tab"}), true);
         assert!(d.h.state().ui.mini_flowchart.is_none(), "dock-tab traversal must not open a foreground popup");
         if d.h.ctx.memory(|memory| memory.focused()) == Some(target) {

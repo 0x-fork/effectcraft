@@ -73,10 +73,11 @@ fn project_double_click_opens_a_comp_as_its_own_timeline_tab() {
     assert_eq!(open_comps(&h), vec![main, pre]);
     assert_eq!(h.state().session.state.active_comp, Some(ItemId(pre)));
     assert_eq!(h.state().session.project.item(ItemId(pre)).map(|i| i.name.clone()), Some("Pre".into()));
-    // One Timeline tab per comp, the newest last; the shown one answers to the panel's id.
+    // One comp tab per comp in the Timeline's tab strip, the newest last.
     let (tm, tp) = (rect(&h, &format!("panel.tab.Timeline.{main}")), rect(&h, &format!("panel.tab.Timeline.{pre}")));
-    assert!(tp.min.x > tm.max.x, "{tm:?} {tp:?}");
-    assert_eq!(rect(&h, "panel.tab.Timeline"), tp);
+    assert!(tp.min.x >= tm.max.x - 0.5, "{tm:?} {tp:?}");
+    let strip = rect(&h, "panel.tab.Timeline");
+    assert!(strip.y_range().contains(tp.center().y) && tp.min.x > strip.max.x, "{strip:?} {tp:?}");
     // Clicking Main's tab shows Main again; both stay open.
     click_n(&mut h, tm.center(), 1);
     assert_eq!(h.state().session.state.active_comp, Some(ItemId(main)));
@@ -171,18 +172,17 @@ fn double_clicking_a_precomp_bar_opens_its_comp() {
     assert_eq!(h.state().session.active_comp_id(), Some(ItemId(pre)));
 }
 
-/// Issue #46: a panel dragged by its panel-menu (hamburger) button onto the left edge of another
-/// group docks there as its own group; dragging the gap between panels resizes them.
+/// Issue #46: a panel dragged onto the left edge of another group docks there as its own group;
+/// dragging the gap between panels resizes them.
 #[test]
 fn panels_dock_beside_others_and_gutters_resize_them() {
     let (mut h, _, _) = harness();
     let dock = |h: &Harness<'_, EffectcraftApp>| h.state().ui.dock.clone();
-    // Show Effect Controls in its group so its menu button is on screen, then drag by it.
     let tab = rect(&h, "panel.tab.EffectControls");
-    click_n(&mut h, tab.center(), 1);
-    let grip = rect(&h, "panel.menu.EffectControls").center();
     let tl = rect(&h, "panel.Timeline");
-    drag(&mut h, grip, pos2(tl.min.x + tl.width() * 0.08, tl.center().y));
+    // Inside the Timeline body's left drop zone.
+    let depth = craft_ui::docking::SIDE_EDGE_ZONE_DEPTH.min(tl.width().min(tl.height()) / 4.0);
+    drag(&mut h, tab.center(), pos2(tl.min.x + depth / 2.0, tl.center().y));
     assert_eq!(group_of(&dock(&h), PanelKind::EffectControls), Some(vec![PanelKind::EffectControls]));
     assert!(!group_of(&dock(&h), PanelKind::Timeline).unwrap().contains(&PanelKind::EffectControls));
     let (fx, tl) = (rect(&h, "panel.EffectControls"), rect(&h, "panel.Timeline"));
@@ -221,24 +221,26 @@ fn stacked_panel_gaps_resize_the_panels() {
     }
     let (preview, props) = (rect(&h, "panel.Preview"), rect(&h, "panel.Properties"));
     let gap = rect(&h, "dock.gutter.bs0");
-    assert!(gap.center().y > preview.max.y && gap.center().y < props.min.y, "the gap below Preview: {gap:?}");
+    assert!(gap.center().y >= preview.max.y - 1.0 && gap.center().y <= props.min.y + 1.0, "the gap below Preview: {gap:?}");
     drag(&mut h, gap.center(), gap.center() + egui::vec2(0.0, 150.0));
     let (p2, q2) = (rect(&h, "panel.Preview"), rect(&h, "panel.Properties"));
     assert!((p2.height() - preview.height() - 150.0).abs() < 2.0, "Preview {} → {}", preview.height(), p2.height());
     assert!((props.height() - q2.height() - 150.0).abs() < 2.0, "Properties {} → {}", props.height(), q2.height());
     assert!((q2.max.y - props.max.y).abs() < 1.0, "the column stays filled");
-    let saved = height(&h.state().ui.dock, PanelKind::Preview).flatten().expect("Preview's height is in the layout");
-    assert!((saved - p2.height()).abs() < 2.0, "{saved} vs {}", p2.height());
-    assert_eq!(height(&h.state().ui.dock, PanelKind::Properties), Some(None), "Properties still takes the rest");
+    // The saved heights share the column as the panels do.
+    let saved = |p| height(&h.state().ui.dock, p).flatten().expect("the height is in the layout");
+    let (sp, sq) = (saved(PanelKind::Preview), saved(PanelKind::Properties));
+    assert!((sp / sq - p2.height() / q2.height()).abs() < 0.02, "{sp}/{sq} vs {}/{}", p2.height(), q2.height());
     // Collapsing and expanding Preview keeps its height.
-    let tab = rect(&h, "panel.tab.Preview");
-    click_n(&mut h, tab.center(), 1);
+    let toggle = rect(&h, "panel.header.Preview");
+    click_n(&mut h, toggle.center(), 1);
     assert!(!h.state().ui.dock.is_visible(PanelKind::Preview));
-    click_n(&mut h, tab.center(), 1);
+    click_n(&mut h, toggle.center(), 1);
     assert!((rect(&h, "panel.Preview").height() - p2.height()).abs() < 1.0);
-    // Not below the minimum.
+    // Dragged up to Preview's top, it stops at its minimum.
     let gap = rect(&h, "dock.gutter.bs0");
-    drag(&mut h, gap.center(), gap.center() - egui::vec2(0.0, 400.0));
+    let top = rect(&h, "panel.Preview").min.y;
+    drag(&mut h, gap.center(), pos2(gap.center().x, top));
     assert!((rect(&h, "panel.Preview").height() - 40.0).abs() < 1.0, "{}", rect(&h, "panel.Preview").height());
 }
 
@@ -333,41 +335,52 @@ fn dragging_the_viewer_timeline_divider_far_up_does_not_crash() {
     h.run_steps(2);
 }
 
-/// Issue #301: clicking anywhere on a stacked panel's header bar expands/collapses it, not only
-/// its name; the panel menu button keeps its own click.
+/// Issue #301: a stacked panel's header bar opens it with a click anywhere on it, and its −/+
+/// button at the bar's right end collapses and expands it.
 #[test]
 fn a_stacked_panels_whole_header_bar_toggles_it() {
     let (mut h, _, _) = harness();
     let open = |h: &Harness<'_, EffectcraftApp>| h.state().ui.dock.is_visible(PanelKind::Preview);
     assert!(open(&h));
-    let bar = rect(&h, "panel.header.Preview");
-    let tab = rect(&h, "panel.tab.Preview");
-    assert!(bar.min.x >= tab.max.x - 1.0 && bar.width() > 40.0, "{bar:?} {tab:?}");
-    click_n(&mut h, pos2(bar.max.x - 6.0, bar.center().y), 1);
-    assert!(!open(&h), "a click at the bar's right end collapses Preview");
-    let bar = rect(&h, "panel.header.Preview");
-    click_n(&mut h, bar.center(), 1);
+    let toggle = rect(&h, "panel.header.Preview");
+    let bar = rect(&h, "panel.tab.Preview");
+    assert!(toggle.max.x <= bar.max.x + 1.0 && toggle.min.x > bar.center().x, "{toggle:?} {bar:?}");
+    click_n(&mut h, toggle.center(), 1);
+    assert!(!open(&h), "the button collapses Preview");
+    let toggle = rect(&h, "panel.header.Preview");
+    click_n(&mut h, toggle.center(), 1);
     assert!(open(&h), "and expands it again");
-    let menu = rect(&h, "panel.menu.Preview");
-    click_n(&mut h, menu.center(), 1);
-    assert!(open(&h), "the panel menu button doesn't toggle the panel");
+    let toggle = rect(&h, "panel.header.Preview");
+    click_n(&mut h, toggle.center(), 1);
+    assert!(!open(&h));
+    click_n(&mut h, pos2(bar.min.x + bar.width() * 0.25, bar.center().y), 1);
+    assert!(open(&h), "a click on the bar away from the button opens it");
 }
 
-/// #302: a panel dropped onto a stacked panel becomes a tab in that panel's frame (it was
-/// inserted as a stacked panel of its own below it); its tabs switch the frame's panel.
+/// #302: a panel dropped onto a stacked panel joins the stack as a stacked panel of its own
+/// below it (each stacked entry holds one panel), and opens and closes on its own.
 #[test]
 fn a_tab_dropped_on_a_stacked_panel_joins_its_frame() {
     let (mut h, _, _) = harness();
     let dock = |h: &Harness<'_, EffectcraftApp>| h.state().ui.dock.clone();
+    let stacked = |h: &Harness<'_, EffectcraftApp>| match &h.state().ui.dock.layout.root {
+        Some(Node::Split { second, .. }) => match second.as_ref() {
+            Node::Stack { entries } => entries.iter().map(|e| e.panel).collect::<Vec<_>>(),
+            other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    };
     let fx = rect(&h, "panel.tab.EffectControls");
     let props = rect(&h, "panel.Properties");
     drag(&mut h, fx.center(), props.center());
-    assert_eq!(group_of(&dock(&h), PanelKind::Properties), Some(vec![PanelKind::Properties, PanelKind::EffectControls]));
-    assert!(dock(&h).is_visible(PanelKind::EffectControls) && !dock(&h).is_visible(PanelKind::Properties));
-    // The frame's other tab shows Properties again, the frame stays open.
-    let tab = rect(&h, "panel.tab.Properties");
-    click_n(&mut h, tab.center(), 1);
-    assert!(dock(&h).is_visible(PanelKind::Properties) && !dock(&h).is_visible(PanelKind::EffectControls));
+    let order = stacked(&h);
+    let at = order.iter().position(|p| *p == PanelKind::Properties).unwrap();
+    assert_eq!(order.get(at + 1), Some(&PanelKind::EffectControls), "{order:?}");
+    assert!(dock(&h).is_visible(PanelKind::EffectControls) && dock(&h).is_visible(PanelKind::Properties));
+    // Its header button closes it alone.
+    let toggle = rect(&h, "panel.header.EffectControls");
+    click_n(&mut h, toggle.center(), 1);
+    assert!(!dock(&h).is_visible(PanelKind::EffectControls) && dock(&h).is_visible(PanelKind::Properties));
     // The layout (saved workspaces) round-trips.
     let s = serde_json::to_string(&dock(&h)).unwrap();
     assert_eq!(serde_json::from_str::<Workspace>(&s).unwrap(), dock(&h));

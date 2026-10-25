@@ -182,8 +182,9 @@ fn panels_taller_than_their_space_have_a_scroll_bar_to_drag() {
         for _ in 0..6 {
             app.session.execute("renderQueue.add", json!({})).unwrap();
         }
+        // The panel alone in the window (maximizing a stacked panel maximizes its whole stack).
+        app.ui.dock = effectcraft_ui_egui::dock::docked(effectcraft_ui_egui::dock::tabs(&[panel], 0));
         app.show_panel(panel);
-        app.ui.maximized = Some(panel);
         h.run_steps(3);
         let (_, max) = scrolled(&h, id);
         assert!(max > 0.0, "{id}: the rows overflow");
@@ -193,7 +194,8 @@ fn panels_taller_than_their_space_have_a_scroll_bar_to_drag() {
         click_at(&mut h, pos2(bar.center().x, bar.min.y + 2.0));
         assert_eq!(scrolled(&h, id).0, 0.0, "{id}: at the top");
         drag(&mut h, pos2(bar.center().x, bar.min.y + 6.0), pos2(bar.center().x, bar.max.y + 40.0));
-        assert_eq!(scrolled(&h, id).0, max, "{id}: dragged to the end");
+        let end = scrolled(&h, id).0;
+        assert!((end - max).abs() < 0.01, "{id}: dragged to the end: {end} of {max}");
     }
 }
 

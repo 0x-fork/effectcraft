@@ -147,6 +147,8 @@ fn type_tool_click_type_edit_and_commit() {
     let (_, _, a, c) = edited(&h);
     assert_eq!((a, c), (0, 10));
     h.state_mut().show_panel(PanelKind::Character);
+    // Room for the whole Character panel in the stack.
+    h.state_mut().apply_dock(craft_ui::docking::Action::SetStackOpen { panel: PanelKind::Properties, open: false }).unwrap();
     h.run_steps(3);
     let bold = rect(&h, "character.fauxBold");
     click(&mut h, bold.center(), Modifiers::NONE);
