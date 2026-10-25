@@ -394,6 +394,15 @@ pub struct Session {
     pub project: Arc<Project>,
     pub history: History,
     pub revision: u64,
+    /// Process-unique monotonic revision of the on-canvas editor's committed text and session.
+    /// Unlike [`Session::revision`], unrelated project edits do not advance it; the IME receipt
+    /// uses it when surrounding text is unavailable. Read it with
+    /// [`commands::text_edit::ime_stamp_revision`].
+    ///
+    /// Stamps come from a process-global checked allocator and are never rewound: a failed
+    /// atomic batch keeps the highest intermediate stamp. On allocator exhaustion no stamp is
+    /// issued, so an unavailable receipt cannot be accepted with a reused revision.
+    pub ime_revision: u64,
     pub saved_revision: u64,
     /// The project as last opened or saved: the project is unmodified while it is this very
     /// snapshot, so undoing back to the saved state clears the modified mark.
@@ -562,6 +571,8 @@ impl Default for Session {
             project,
             history: History::default(),
             revision: 0,
+            // A fresh session gets its own process-monotonic stamp even before its first edit.
+            ime_revision: commands::text_edit::next_ime_revision().unwrap_or(u64::MAX),
             saved_revision: 0,
             path: None,
             state: EditorState { snapping: true, view_layout: 1, ..Default::default() },
@@ -692,7 +703,7 @@ impl Session {
     /// epoch. The editor's own typing goes through `edit_text_doc`, which owns that
     /// document and must not treat its own keystrokes as a replacement.
     pub fn edit<T>(&mut self, label: &str, merge: Option<&str>, f: impl FnOnce(&mut Project, &mut EditorState) -> Result<T>) -> Result<T> {
-        let edited = commands::text_edit::active_editor_doc(self);
+        let edited = commands::text_edit::active_editor_snapshot(self);
         let out = self.edit_inner(label, merge, f)?;
         commands::text_edit::after_external_change(self, edited.as_ref());
         Ok(out)
@@ -749,6 +760,19 @@ impl Session {
         self.state = st;
         self.bump();
         Ok(r)
+    }
+
+    /// Note a change to the on-canvas editor's committed text or session.
+    ///
+    /// Frontends compare this with [`commands::text_edit::ime_stamp_revision`]; an unrelated
+    /// project change must not advance it.
+    pub(crate) fn note_text_edit_change(&mut self) {
+        // Checked process-wide allocation: a stamp is never wrapped or reused. On exhaustion
+        // keep the previous value; an unavailable before/after pair then compares equal and
+        // earns no receipt instead of accepting a stale revision.
+        if let Some(revision) = commands::text_edit::next_ime_revision() {
+            self.ime_revision = self.ime_revision.max(revision);
+        }
     }
 
     pub fn bump(&mut self) {
@@ -823,32 +847,46 @@ impl Session {
 
     pub fn undo(&mut self) -> bool {
         let Some((label, p)) = self.history.undo.pop() else { return false };
+        let edited = commands::text_edit::active_editor_snapshot(self);
         let cur = std::mem::replace(&mut self.project, p);
         self.keep_view_settings(&cur);
         self.history.redo.push((label, cur));
         self.history.merge_key = None;
-        self.sanitize_after_replacement();
+        self.sanitize_after_replacement(edited.as_ref());
         self.bump();
         true
     }
 
     pub fn redo(&mut self) -> bool {
         let Some((label, p)) = self.history.redo.pop() else { return false };
+        let edited = commands::text_edit::active_editor_snapshot(self);
         let cur = std::mem::replace(&mut self.project, p);
         self.keep_view_settings(&cur);
         self.history.undo.push((label, cur));
         self.history.merge_key = None;
-        self.sanitize_after_replacement();
+        self.sanitize_after_replacement(edited.as_ref());
         self.bump();
         true
     }
 
     /// Keep selections valid after the project was replaced by another state (undo, redo, a
     /// history jump, a rollback): the same layer id can name a different document, so the
-    /// on-canvas editor gets a fresh IME epoch.
-    pub fn sanitize_after_replacement(&mut self) {
+    /// on-canvas editor gets a fresh IME epoch only when its own document changed.
+    ///
+    /// Normally `before` is [`commands::text_edit::active_editor_snapshot`] taken from the
+    /// state this call is about to replace. Atomic batch rollback is the exception: it has
+    /// already restored the pre-batch state and passes the snapshot of the failing intermediate
+    /// state, so a transient restart or component switch inside the batch still rejects reviving
+    /// the old composition. A restored state that still has the same composition, layer and
+    /// editor session and shows byte/style-equivalent text (an opacity or other property undo)
+    /// keeps the editor's owner and selection; a different document, comp, layer or session clamps the
+    /// selection and starts a new epoch. A closed editor stays closed, and a fallback comp's
+    /// matching layer id never inherits the old comp's session. `None` means no editor was open
+    /// when the snapshot was taken; if one is open after the replacement it is treated as an
+    /// unverified document replacement, so it never inherits an old composition.
+    pub fn sanitize_after_replacement(&mut self, before: Option<&commands::text_edit::EditorSnapshot>) {
         self.sanitize_state();
-        commands::text_edit::document_replaced(self);
+        commands::text_edit::after_replacement(self, before);
     }
 
     /// Drop selections that no longer exist. Each comp keeps its own selection (#1001); a layer id
@@ -936,7 +974,7 @@ impl Session {
     pub fn set_time(&mut self, t: Tick) {
         if let Some(c) = self.state.active_comp {
             let t = self.project.comp(c).map_or(t, |comp| comp_frame_at(comp, t));
-            let edited = commands::text_edit::active_editor_doc(self);
+            let edited = commands::text_edit::active_editor_snapshot(self);
             self.state.times.insert(c, t);
             if self.prefs.general.sync_time_related_items {
                 // Direct call: this `set_time` owns the editor snapshot for both time changes,
@@ -953,7 +991,7 @@ impl Session {
     pub fn sync_related_times(&mut self, comp: ItemId, t: Tick) {
         // Moving a related comp can move the active one, so the editor's document is checked
         // here too; the snapshot is skipped entirely when no text editor is open.
-        let edited = commands::text_edit::active_editor_doc(self);
+        let edited = commands::text_edit::active_editor_snapshot(self);
         self.sync_related_times_inner(comp, t);
         commands::text_edit::after_external_change(self, edited.as_ref());
     }

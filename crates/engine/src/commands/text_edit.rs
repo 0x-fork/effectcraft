@@ -6,7 +6,7 @@
 //! Positions are character indices. The selection is `anchor..caret` (either order).
 
 use effectcraft_keyframe::{CharStyle, TextDoc, Value as KV};
-use effectcraft_project::{LayerId, LayerSource};
+use effectcraft_project::{ItemId, LayerId, LayerSource};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -16,6 +16,41 @@ static NEXT_EDIT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::Atom
 
 pub(super) fn next_edit_session() -> u64 {
     NEXT_EDIT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Process-global checked high-water allocator for [`crate::Session::ime_revision`] stamps.
+///
+/// egui's unavailable-IME receipt identity must be process-monotonic. Allocating the stamp from
+/// one process-global counter means neither a second session nor a rollback can reuse a value.
+/// The counter fails closed at `u64::MAX`: it returns `None` without wrapping, and callers keep
+/// their existing stamp. An unavailable before/after pair then compares equal, so it earns no
+/// receipt rather than claiming a mutation with a reused revision.
+static NEXT_IME_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub(crate) fn next_ime_revision() -> Option<u64> {
+    allocate_ime_revision(&NEXT_IME_REVISION)
+}
+
+fn allocate_ime_revision(counter: &std::sync::atomic::AtomicU64) -> Option<u64> {
+    use std::sync::atomic::Ordering::Relaxed;
+    let mut current = counter.load(Relaxed);
+    loop {
+        let next = current.checked_add(1)?;
+        match counter.compare_exchange_weak(current, next, Relaxed, Relaxed) {
+            Ok(_) => return Some(next),
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+#[test]
+fn ime_revision_allocation_stops_at_exhaustion_without_reusing_a_stamp() {
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+    let counter = AtomicU64::new(u64::MAX - 1);
+    assert_eq!(allocate_ime_revision(&counter), Some(u64::MAX));
+    assert_eq!(allocate_ime_revision(&counter), None);
+    assert_eq!(allocate_ime_revision(&counter), None);
+    assert_eq!(counter.load(Relaxed), u64::MAX);
 }
 
 use super::{CommandSpec, b_p, bad, comp_id, layer_mut, resolve_layer, str_p};
@@ -38,11 +73,13 @@ pub struct TextEdit {
     pub goal_x: Option<f64>,
     /// This editing session's identity.
     ///
-    /// It changes when the editor is started, its layer/document is replaced (including by
-    /// undo/redo), or the editor is restored from another state. It is deliberately not
-    /// serialized: a saved token belongs to a previous process and cannot identify a new
-    /// target. The IME owner uses it as its replacement epoch, so an old composition is never
-    /// inherited by a recreated layer or a replaced document.
+    /// It changes when the editor is started and when its layer or document is replaced, by
+    /// undo/redo, a history jump, a rollback, or a time change showing another document. A
+    /// restore that keeps the same composition, layer and byte/style-equal document (an opacity
+    /// undo while editing) keeps it, so an active IME composition survives an unrelated change.
+    /// It is deliberately not serialized: a saved token belongs to a previous process and
+    /// cannot identify a new target. The IME owner uses it as its replacement epoch, so an old
+    /// composition is never inherited by a recreated layer or a replaced document.
     #[serde(skip, default = "next_edit_session")]
     pub session: u64,
 }
@@ -77,6 +114,15 @@ pub fn layer_doc(s: &Session, lid: LayerId) -> Option<TextDoc> {
 /// This mirrors `egui::output::MAX_IME_SURROUNDING_TEXT_BYTES`: a selection wider than this is
 /// reported as unavailable rather than silently truncated.
 pub const MAX_IME_TEXT_BYTES: usize = 4000;
+
+/// The editor's committed-text revision for an IME receipt whose surrounding text is
+/// unavailable (a selection wider than [`MAX_IME_TEXT_BYTES`]).
+///
+/// Unlike [`Session::revision`], unrelated project edits (an opacity undo) do not advance it, so
+/// they cannot make an active composition look stale.
+pub fn ime_stamp_revision(s: &Session) -> u64 {
+    s.ime_revision
+}
 
 /// Bounded committed text around an IME selection, with UTF-8 byte offsets.
 ///
@@ -248,6 +294,7 @@ pub(crate) fn edit_doc(
 ) -> Result<()> {
     let cid = s.active_comp_id().ok_or(EngineError::NoComp)?;
     let t = s.time();
+    let revision = s.revision;
     s.edit_text_doc(label, merge, |proj, st| {
         let l = layer_mut(proj, cid, lid)?;
         let lt = l.layer_time(t);
@@ -272,7 +319,13 @@ pub(crate) fn edit_doc(
             }
         }
         Ok(())
-    })
+    })?;
+    // The editor's unavailable-text receipt identity follows only its own document: an edit to
+    // another text layer while this editor is open must not cancel the composition.
+    if s.revision != revision && s.state.text_edit.as_ref().is_some_and(|e| e.layer == lid) {
+        s.note_text_edit_change();
+    }
+    Ok(())
 }
 
 fn range_p(p: &Value) -> Option<std::ops::Range<usize>> {
@@ -675,8 +728,12 @@ fn paste_formatting(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Give the current editor a fresh replacement epoch after its document/layer was replaced.
 pub(crate) fn invalidate_session(s: &mut Session) {
+    let replaced = s.state.text_edit.is_some();
     if let Some(e) = s.state.text_edit.as_mut() {
         e.session = next_edit_session();
+    }
+    if replaced {
+        s.note_text_edit_change();
     }
 }
 
@@ -685,7 +742,8 @@ pub(crate) fn invalidate_session(s: &mut Session) {
 /// This is the one replacement path for document changes outside `edit_doc`:
 /// [`crate::Session::edit`] calls [`after_external_change`] after every edit, [`crate::Session::set_time`]
 /// and [`crate::Session::sync_related_times`] call it after moving the CTI, and
-/// [`crate::Session::sanitize_after_replacement`] calls it when it restores a whole document.
+/// [`crate::Session::sanitize_after_replacement`] calls it with the editor document snapshotted
+/// before a history restore or rollback.
 /// Clamping first means a shortened document leaves the caret in range, so the next Backspace
 /// deletes instead of being swallowed by an out-of-range selection.
 pub(crate) fn document_replaced(s: &mut Session) {
@@ -693,27 +751,69 @@ pub(crate) fn document_replaced(s: &mut Session) {
     invalidate_session(s);
 }
 
-/// The document the active on-canvas editor is showing, with its layer.
+/// The identity and document of the active on-canvas editor at one moment.
+///
+/// The composition and the editor session are part of the identity: a restoration must not keep
+/// a composition alive when the snapshot came from another comp, or from an intermediate editor
+/// that was restarted during the operation being rolled back.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EditorSnapshot {
+    /// The composition the editor was attached to.
+    pub comp: ItemId,
+    /// The edited layer.
+    pub layer: LayerId,
+    /// The editor session token, unique across the process.
+    pub session: u64,
+    /// The Source Text the editor was showing.
+    pub doc: TextDoc,
+}
+
+/// The identity and document the active on-canvas editor is showing.
 ///
 /// [`crate::Session::edit`] and the time setters snapshot this before a change and compare it
 /// afterwards: only a change that actually replaces this document starts a new epoch, while a
 /// write to another property, layer or composition, a move to a time showing the same text, or a
 /// write that leaves the text as it was, keeps the editor's owner. With no editor open this is a
 /// single `Option` check, with no document copy.
-pub(crate) fn active_editor_doc(s: &Session) -> Option<(LayerId, TextDoc)> {
+pub fn active_editor_snapshot(s: &Session) -> Option<EditorSnapshot> {
     let e = s.state.text_edit.as_ref()?;
-    Some((e.layer, layer_doc(s, e.layer)?))
+    Some(EditorSnapshot { comp: s.active_comp_id()?, layer: e.layer, session: e.session, doc: layer_doc(s, e.layer)? })
 }
 
-/// Finish a change outside the editor: if it replaced the document the editor owned, clamp the
+/// Finish an edit outside the editor: if it replaced the document the editor owned, clamp the
 /// selection and start a new IME epoch.
-pub(crate) fn after_external_change(s: &mut Session, before: Option<&(LayerId, TextDoc)>) {
-    let Some((lid, before)) = before else { return };
-    // The change ended the editor or moved it to another layer: that path owns its own session.
-    if !s.state.text_edit.as_ref().is_some_and(|e| e.layer == *lid) {
+///
+/// An edit that itself moves or closes the editor owns the resulting session, so an identity
+/// mismatch is not a replacement here.
+pub(crate) fn after_external_change(s: &mut Session, before: Option<&EditorSnapshot>) {
+    let Some(before) = before else { return };
+    let Some(e) = s.state.text_edit.as_ref() else { return };
+    if s.state.active_comp != Some(before.comp) || e.layer != before.layer || e.session != before.session {
         return;
     }
-    if layer_doc(s, *lid).as_ref() != Some(before) {
+    if layer_doc(s, before.layer).as_ref() != Some(&before.doc) {
+        document_replaced(s);
+    }
+}
+
+/// Finish a project-state replacement (undo, redo, a history jump, a rollback): keep the editor
+/// only when the restored state still has the same composition, layer and editor session and
+/// shows byte/style-equal text.
+///
+/// The restored session token is the one saved in the replaced state, so an intermediate
+/// restart or cross-comp switch must be detected against the snapshot instead of being assumed
+/// to be the editor's own change.
+pub(crate) fn after_replacement(s: &mut Session, before: Option<&EditorSnapshot>) {
+    let Some(before) = before else {
+        // No editor was open when the snapshot was taken: a restored editor must not inherit a
+        // composition from the state the replacement replaced.
+        if s.state.text_edit.is_some() {
+            document_replaced(s);
+        }
+        return;
+    };
+    let same = s.state.text_edit.as_ref().is_some_and(|e| s.state.active_comp == Some(before.comp) && e.layer == before.layer && e.session == before.session);
+    if !same || layer_doc(s, before.layer).as_ref() != Some(&before.doc) {
         document_replaced(s);
     }
 }

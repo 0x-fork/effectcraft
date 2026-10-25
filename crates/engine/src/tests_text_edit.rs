@@ -6,7 +6,7 @@ use effectcraft_keyframe::{BaselineOption, Justify, Kerning, TextDoc};
 use serde_json::json;
 
 use crate::Session;
-use crate::commands::text_edit::{MAX_IME_TEXT_BYTES, ime_surrounding, layer_doc};
+use crate::commands::text_edit::{MAX_IME_TEXT_BYTES, ime_stamp_revision, ime_surrounding, layer_doc};
 
 fn session(text: &str) -> (Session, u64) {
     let mut s = Session::default();
@@ -401,6 +401,257 @@ fn property_writes_replace_the_edited_document_only_when_the_text_changes() {
 }
 
 #[test]
+fn undo_and_redo_of_an_unrelated_property_keep_the_ime_owner_and_selection() {
+    let (mut s, t) = editing("abcdef", 3);
+    let owner = ime_owner(&s);
+
+    s.execute("prop.set", json!({"layer": t, "path": "transform/opacity", "value": 50})).unwrap();
+    assert_ime_owner(&s, owner, "the opacity write keeps the owner");
+    assert_eq!(sel(&s), (3, 3), "the opacity write keeps the selection");
+
+    // The opacity step does not change Source Text: restoring it keeps the same editor.
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_ime_owner(&s, owner, "undoing only opacity keeps the owner");
+    assert_eq!(sel(&s), (3, 3), "undoing only opacity keeps the selection");
+
+    s.execute("edit.redo", json!({})).unwrap();
+    assert_ime_owner(&s, owner, "redoing only opacity keeps the owner");
+    assert_eq!(sel(&s), (3, 3), "redoing only opacity keeps the selection");
+}
+
+#[test]
+fn a_style_only_text_change_and_its_undo_replace_the_editor_epoch() {
+    let (mut s, t) = editing("abcdef", 3);
+    let owner = ime_owner(&s);
+
+    // The same characters with another run style are still a different document.
+    s.execute("layer.setText", json!({"layer": t, "range": [1, 4], "size": 12})).unwrap();
+    assert_eq!(doc(&s, t).text, "abcdef");
+    assert_eq!(doc(&s, t).style_at(2).size, 12.0);
+    assert_ime_epoch_changed(&s, owner, "a style-only change starts a new IME epoch");
+    assert_eq!(sel(&s), (3, 3), "a same-length style change keeps the caret in range");
+    let styled = ime_owner(&s);
+
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(doc(&s, t).style_at(2).size, 60.0);
+    assert_ime_epoch_changed(&s, styled, "undoing a style change starts a new IME epoch");
+}
+
+#[test]
+fn history_jumps_keep_the_owner_over_unrelated_steps_and_replace_it_when_the_text_changes() {
+    let (mut s, t) = editing("abcdef", 3);
+    let owner = ime_owner(&s);
+    s.execute("prop.set", json!({"layer": t, "path": "transform/opacity", "value": 50})).unwrap();
+    s.execute("prop.set", json!({"layer": t, "path": "transform/opacity", "value": 25})).unwrap();
+    let states = s.execute("edit.history.list", json!({})).unwrap()["states"].as_array().unwrap().clone();
+    let cur = states.iter().find(|n| n["current"] == true).unwrap()["index"].as_u64().unwrap();
+    let parent = states.iter().find(|n| n["index"].as_u64() == Some(cur)).unwrap()["parent"].as_u64().unwrap();
+
+    // Both states show the same Source Text: jumping between them keeps the editor.
+    s.execute("edit.history.goto", json!({"index": parent})).unwrap();
+    assert_ime_owner(&s, owner, "jumping to another opacity state keeps the owner");
+    assert_eq!(sel(&s), (3, 3), "and the selection");
+    s.execute("edit.history.goto", json!({"index": cur})).unwrap();
+    assert_ime_owner(&s, owner, "jumping back keeps the owner");
+    assert_eq!(sel(&s), (3, 3), "and the selection");
+
+    // A history state whose Source Text differs is a document replacement.
+    set_source(&mut s, t, "abc");
+    let changed = ime_owner(&s);
+    assert_ne!(changed, owner);
+    s.execute("edit.history.goto", json!({"index": parent})).unwrap();
+    assert_text(&s, t, "abcdef");
+    assert_ime_epoch_changed(&s, changed, "jumping to a different document starts a new epoch");
+}
+
+#[test]
+fn atomic_batch_rollback_keeps_the_owner_for_unrelated_steps_and_replaces_it_for_text_changes() {
+    let (mut s, t) = editing("abcdef", 3);
+    let owner = ime_owner(&s);
+    let r = s.execute(
+        "engine.batch",
+        json!({"atomic": true, "steps": [
+            {"command": "prop.set", "params": {"layer": t, "path": "transform/opacity", "value": 50}},
+            {"command": "no.suchCommand", "params": {}}
+        ]}),
+    );
+    assert!(r.is_err());
+    assert_ime_owner(&s, owner, "rolling back an unrelated step keeps the owner");
+    assert_eq!(sel(&s), (3, 3), "and the selection");
+
+    // A partially applied text replacement was still shown before the rollback restores the
+    // original document, so the editor must not revive the composition it had before the batch.
+    let r = s.execute(
+        "engine.batch",
+        json!({"atomic": true, "steps": [
+            {"command": "layer.setText", "params": {"layer": t, "text": "ab"}},
+            {"command": "no.suchCommand", "params": {}}
+        ]}),
+    );
+    assert!(r.is_err());
+    assert_text(&s, t, "abcdef");
+    assert_ime_epoch_changed(&s, owner, "a rolled-back text change does not revive the old owner");
+    assert_eq!(sel(&s), (3, 3), "the restored document keeps the caret in range");
+}
+
+#[test]
+fn atomic_batch_rollback_after_a_transient_editor_restart_bumps_the_epoch() {
+    let (mut s, t) = editing("abcdef", 3);
+    let owner = ime_owner(&s);
+
+    // `text.edit` restarts the session even on the layer that is already edited. The rollback
+    // restores the pre-batch TextEdit (with the old token), so the intermediate restart must be
+    // detected from the snapshot: neither the old composition nor its token may be revived.
+    let r = s.execute(
+        "engine.batch",
+        json!({"atomic": true, "steps": [
+            {"command": "text.edit", "params": {"layer": t, "caret": 1}},
+            {"command": "no.suchCommand", "params": {}}
+        ]}),
+    );
+    assert!(r.is_err());
+    assert_eq!(sel(&s), (3, 3), "the restored selection is the pre-batch one");
+    assert_ime_epoch_changed(&s, owner, "a canceled intermediate editor must not revive the old token");
+}
+
+#[test]
+fn atomic_batch_rollback_after_a_cross_comp_editor_switch_bumps_the_epoch() {
+    let (mut s, t) = session("abcdef");
+    let original = s.active_comp_id().unwrap();
+    // Give the other comp a layer with the same id and the same Source Text, so only the comp
+    // and editor-session identity distinguishes the two editors.
+    let layer = s.active_comp().unwrap().layer(effectcraft_project::LayerId(t)).unwrap().clone();
+    let other = new_other_comp(&mut s);
+    let other_id = effectcraft_project::ItemId(other);
+    std::sync::Arc::make_mut(&mut s.project).comp_mut(other_id).unwrap().layers.push(layer);
+    s.execute("comp.open", json!({"comp": original.0})).unwrap();
+    begin_edit_at(&mut s, t, 3);
+    let owner = ime_owner(&s);
+
+    let r = s.execute(
+        "engine.batch",
+        json!({"atomic": true, "steps": [
+            {"command": "comp.open", "params": {"comp": other}},
+            {"command": "text.edit", "params": {"layer": t, "caret": 1}},
+            {"command": "no.suchCommand", "params": {}}
+        ]}),
+    );
+    assert!(r.is_err());
+    assert_eq!(s.active_comp_id(), Some(original), "the batch restored the original comp");
+    assert_eq!(sel(&s), (3, 3), "and the pre-batch selection");
+    assert_ime_epoch_changed(&s, owner, "an identical layer in another comp must not revive the old token");
+}
+
+#[test]
+fn atomic_batch_rollback_after_closing_the_editor_does_not_revive_it() {
+    let (mut s, t) = session("abcdef");
+    let original = s.active_comp_id().unwrap();
+    let other = new_other_comp(&mut s);
+    s.execute("comp.open", json!({"comp": original.0})).unwrap();
+    begin_edit_at(&mut s, t, 3);
+    let owner = ime_owner(&s);
+
+    // The failing state has no editor at all: the restoration brings the pre-batch one back and
+    // must treat it as unverified rather than revive its composition.
+    let r = s.execute(
+        "engine.batch",
+        json!({"atomic": true, "steps": [
+            {"command": "comp.open", "params": {"comp": other}},
+            {"command": "no.suchCommand", "params": {}}
+        ]}),
+    );
+    assert!(r.is_err());
+    assert!(s.state.text_edit.is_some(), "the batch restored the editor state");
+    assert_eq!(sel(&s), (3, 3));
+    assert_ime_epoch_changed(&s, owner, "a canceled editor close must not revive the old token");
+}
+
+#[test]
+fn restoring_without_an_editor_snapshot_replaces_an_open_editor() {
+    let (mut s, _) = editing("abcdef", 3);
+    let owner = ime_owner(&s);
+
+    // `None` means no editor was open when the state was replaced; an editor that is open
+    // afterwards cannot prove it kept its document.
+    s.sanitize_after_replacement(None);
+    assert_ime_epoch_changed(&s, owner, "an unverified restored editor starts a new epoch");
+    assert_eq!(sel(&s), (3, 3));
+}
+
+#[test]
+fn undo_to_a_shorter_document_clamps_the_caret() {
+    let (mut s, t) = editing("abc", 3);
+    replace_text(&mut s, t, "abcdef");
+    select_anchor(&mut s, 6, 6);
+    let owner = ime_owner(&s);
+    assert_eq!(sel(&s), (6, 6));
+
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_text(&s, t, "abc");
+    assert_eq!(sel(&s), (3, 3), "undoing to a shorter document clamps the caret");
+    assert_ime_epoch_changed(&s, owner, "and starts a new epoch");
+}
+
+#[test]
+fn the_ime_stamp_revision_follows_the_editor_not_unrelated_project_edits() {
+    let (mut s, t) = editing("abcdef", 6);
+    let revision = ime_stamp_revision(&s);
+
+    s.execute("prop.set", json!({"layer": t, "path": "transform/opacity", "value": 50})).unwrap();
+    assert_eq!(ime_stamp_revision(&s), revision, "an unrelated property write does not advance it");
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(ime_stamp_revision(&s), revision, "undoing it does not either");
+
+    let r = s.execute(
+        "engine.batch",
+        json!({"atomic": true, "steps": [
+            {"command": "prop.set", "params": {"layer": t, "path": "transform/opacity", "value": 25}},
+            {"command": "no.suchCommand", "params": {}}
+        ]}),
+    );
+    assert!(r.is_err());
+    assert_eq!(ime_stamp_revision(&s), revision, "a rolled-back unrelated batch restores it");
+
+    s.execute("text.insert", json!({"text": "x"})).unwrap();
+    assert!(ime_stamp_revision(&s) > revision, "typing advances it");
+    let typed = ime_stamp_revision(&s);
+    s.execute("layer.setText", json!({"layer": t, "text": "y"})).unwrap();
+    assert!(ime_stamp_revision(&s) > typed, "a replaced document advances it too");
+}
+
+#[test]
+fn a_failed_atomic_batch_with_a_transient_edit_keeps_its_high_water_ime_revision() {
+    let (mut s, t) = editing("abcdef", 6);
+    let revision = ime_stamp_revision(&s);
+    let r = s.execute(
+        "engine.batch",
+        json!({"atomic": true, "steps": [
+            {"command": "text.insert", "params": {"text": "x"}},
+            {"command": "text.delete", "params": {}},
+            {"command": "no.suchCommand", "params": {}}
+        ]}),
+    );
+    assert!(r.is_err());
+    assert_text(&s, t, "abcdef");
+    // The intermediate document edit is real even though the final document equals the
+    // pre-batch one: its stamp must remain the high-water mark.
+    assert!(ime_stamp_revision(&s) > revision, "a transient edit must not rewind the IME revision");
+    let after_transient = ime_stamp_revision(&s);
+
+    // An unrelated failed batch really did not edit the document: it must preserve the revision
+    // exactly, or every wide-selection composition would be canceled by unrelated work.
+    let r = s.execute(
+        "engine.batch",
+        json!({"atomic": true, "steps": [
+            {"command": "prop.set", "params": {"layer": t, "path": "transform/opacity", "value": 25}},
+            {"command": "no.suchCommand", "params": {}}
+        ]}),
+    );
+    assert!(r.is_err());
+    assert_eq!(ime_stamp_revision(&s), after_transient, "an unrelated rolled-back batch preserves the revision");
+}
+
+#[test]
 fn a_replacing_property_write_clamps_the_selection_so_the_next_backspace_deletes() {
     let (mut s, t) = editing("abcdef", 6);
     let owner = ime_owner(&s);
@@ -596,9 +847,10 @@ fn removing_the_active_comp_does_not_retarget_its_text_editor() {
 
         // Reproduce cleanup after a project replacement, bypassing Session::edit's earlier
         // document guard so this specifically exercises sanitize_state's fallback-comp branch.
+        let edited = crate::commands::text_edit::active_editor_snapshot(&s);
         std::sync::Arc::make_mut(&mut s.project).items.remove(&original);
         if replacement {
-            s.sanitize_after_replacement();
+            s.sanitize_after_replacement(edited.as_ref());
         } else {
             s.sanitize_state();
         }

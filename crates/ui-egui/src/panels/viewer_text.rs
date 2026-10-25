@@ -14,7 +14,7 @@
 //! Every change runs an engine command (`text.*`, `layer.setText`, `edit.*`), so it's undoable and
 //! agents can do the same over the control channel.
 
-use effectcraft_engine::commands::text_edit::{ImeSurrounding, MAX_IME_TEXT_BYTES, ime_surrounding, layer_doc};
+use effectcraft_engine::commands::text_edit::{ImeSurrounding, MAX_IME_TEXT_BYTES, ime_stamp_revision, ime_surrounding, layer_doc};
 use effectcraft_engine::geom::{Mat3, vec2 as gv2};
 use effectcraft_engine::keyframe::{Kerning, TextDoc};
 use effectcraft_engine::project::{Layer, LayerId, LayerSource};
@@ -334,7 +334,10 @@ fn ime_surrounding_cached(app: &EffectcraftApp, ctx: &egui::Context) -> Option<I
 fn ime_stamp(app: &EffectcraftApp, ctx: &egui::Context) -> egui::ImeMutationStamp {
     match ime_surrounding_cached(app, ctx) {
         Some(w) => egui::ImeMutationStamp::from_committed(&w.text, w.cursor, w.anchor, None),
-        None => egui::ImeMutationStamp::unavailable_at_revision(app.session.revision),
+        // A global project revision would make an unrelated edit (an opacity undo) look like a
+        // mutation of a wide selection. The editor revision only moves with committed text and
+        // the editor session.
+        None => egui::ImeMutationStamp::unavailable_at_revision(ime_stamp_revision(&app.session)),
     }
 }
 
@@ -524,7 +527,11 @@ pub(crate) fn finish_ime(app: &mut EffectcraftApp, ui: &egui::Ui) {
         (Some(target), Some((_, _rect, _cursor_rect))) => {
             let window = ime_surrounding_cached(app, ctx);
             let committed = window.as_ref().map(|w| egui::CommittedText::new(&w.text, w.cursor, w.anchor));
-            app.ime_tracker.observe(viewport, Some(egui::ImeObservation::new(frame, pass, target).committed(committed)))
+            // An unavailable observation still carries the editor revision: it is the only
+            // identity an IME receipt has when the selection is wider than the platform limit,
+            // and it must match `ime_stamp`'s revision exactly.
+            let observation = egui::ImeObservation::new(frame, pass, target).committed(committed).unavailable_revision(ime_stamp_revision(&app.session));
+            app.ime_tracker.observe(viewport, Some(observation))
         }
         _ => {
             app.ime_tracker.observe(viewport, None);
@@ -1735,6 +1742,131 @@ mod tests {
         let wide = pass.frame(&mut app, vec![], true, false).expect("editing");
         assert!(matches!(wide.surrounding_text, egui::output::IMESurroundingText::Unavailable), "a selection wider than the limit is unavailable");
         assert_eq!(wide.owner, ime_target(&app).expect("an edit target").owner, "identity survives unavailable text");
+    }
+
+    #[test]
+    fn an_unrelated_undo_keeps_a_wide_selection_composition() {
+        // A selection wider than the IME limit reports unavailable surrounding text, whose
+        // receipt identity is a revision. That revision must follow the editor, not the whole
+        // project: undoing an unrelated opacity change used to look like an editor mutation and
+        // cancel an active composition.
+        let text = "a".repeat(5000);
+        let (mut app, lid) = editor(&text, 0, 5000);
+        let mut pass = ImePass::new(egui::ViewportId::ROOT);
+        let first = pass.frame(&mut app, vec![], true, false).expect("editing");
+        assert!(matches!(first.surrounding_text, egui::output::IMESurroundingText::Unavailable), "the wide selection is unavailable");
+
+        let composing = pass
+            .frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Preedit { text: "に".into(), active_range_chars: None })], true, false)
+            .expect("still editing");
+        assert_eq!(composing.context_generation, first.context_generation, "the pre-edit keeps the context");
+        let owner = ime_owner(&app).expect("an editor owner");
+        assert!(matches!(
+            pass.ctx.data(|d| d.get_temp::<ImeComposition>(ime_composition_id(pass.viewport))),
+            Some(ImeComposition::Active(active)) if active == owner
+        ));
+
+        app.session.execute("prop.set", json!({"layer": lid.0, "path": "transform/opacity", "value": 50})).unwrap();
+        app.session.execute("edit.undo", json!({})).unwrap();
+        let after = pass.frame(&mut app, vec![], true, false).expect("still editing");
+        assert_eq!(after.context_generation, first.context_generation, "an unrelated undo does not start a new context");
+        assert!(
+            matches!(
+                pass.ctx.data(|d| d.get_temp::<ImeComposition>(ime_composition_id(pass.viewport))),
+                Some(ImeComposition::Active(active)) if active == owner
+            ),
+            "the wide-selection composition survives an unrelated undo"
+        );
+        assert!(read_reset(&pass.ctx).is_none(), "no IME reset was requested");
+
+        // The composition is still the live one: its commit is accepted and earns the
+        // input-method cause rather than being poisoned as leftover application work.
+        let commit = pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Commit("x".into()))], true, false).expect("still editing");
+        assert_eq!(doc_text(&app, lid), "x", "the preserved composition commits into the wide selection");
+        assert_eq!(commit.change_cause, egui::ImeChangeCause::InputMethod);
+    }
+
+    #[test]
+    fn a_failed_batch_with_a_transient_edit_does_not_revive_a_wide_selection_composition() {
+        // The final document equals the pre-batch one, but the intermediate insert/delete was a
+        // real document change. Its IME revision must stay the high-water mark; otherwise the
+        // active wide-selection composition would look current and accept its old commit.
+        let text = "a".repeat(5000);
+        let (mut app, lid) = editor(&text, 0, 5000);
+        let mut pass = ImePass::new(egui::ViewportId::ROOT);
+        pass.frame(&mut app, vec![], true, false).expect("editing");
+        pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Preedit { text: "に".into(), active_range_chars: None })], true, false)
+            .expect("still editing");
+        let owner = ime_owner(&app).expect("an editor owner");
+        assert!(matches!(
+            pass.ctx.data(|d| d.get_temp::<ImeComposition>(ime_composition_id(pass.viewport))),
+            Some(ImeComposition::Active(active)) if active == owner
+        ));
+
+        let r = app.session.execute(
+            "engine.batch",
+            json!({"atomic": true, "steps": [
+                {"command": "text.insert", "params": {"text": "x", "range": [5000, 5000]}},
+                {"command": "text.delete", "params": {}},
+                {"command": "no.suchCommand", "params": {}}
+            ]}),
+        );
+        assert!(r.is_err());
+        assert_eq!(doc_text(&app, lid), text, "the batch restored the final document");
+
+        pass.frame(&mut app, vec![], true, false).expect("still editing");
+        assert!(read_reset(&pass.ctx).is_some(), "the advanced revision retires the old IME context");
+        assert!(
+            matches!(pass.ctx.data(|d| d.get_temp::<ImeComposition>(ime_composition_id(pass.viewport))), Some(ImeComposition::Stale)),
+            "the failed batch's transient edit leaves the old composition stale"
+        );
+        let stale = pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Commit("z".into()))], true, false).expect("still editing");
+        assert_eq!(doc_text(&app, lid), text, "the stale composition cannot commit into the restored document");
+        assert_ne!(stale.change_cause, egui::ImeChangeCause::InputMethod, "a rejected commit earns no IME receipt");
+    }
+
+    #[test]
+    fn a_wide_content_change_invalidates_the_active_composition() {
+        let text = "a".repeat(5000);
+        let (mut app, lid) = editor(&text, 0, 5000);
+        let mut pass = ImePass::new(egui::ViewportId::ROOT);
+        pass.frame(&mut app, vec![], true, false).expect("editing");
+        pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Preedit { text: "に".into(), active_range_chars: None })], true, false)
+            .expect("still editing");
+
+        let replaced = "b".repeat(5000);
+        app.session.execute("layer.setText", json!({"layer": lid.0, "text": replaced})).unwrap();
+        let after = pass.frame(&mut app, vec![], true, false).expect("still editing");
+        assert_eq!(doc_text(&app, lid), replaced);
+        assert!(after.should_interrupt_composition, "replacing the wide document starts a new IME context");
+        assert!(
+            matches!(pass.ctx.data(|d| d.get_temp::<ImeComposition>(ime_composition_id(pass.viewport))), Some(ImeComposition::Stale)),
+            "the old composition is stale after the content change"
+        );
+        pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Commit("z".into()))], true, false).expect("still editing");
+        assert_eq!(doc_text(&app, lid), replaced, "a delayed commit from the old document is rejected");
+    }
+
+    #[test]
+    fn a_wide_selection_change_invalidates_the_active_composition() {
+        let text = "a".repeat(5000);
+        let (mut app, lid) = editor(&text, 0, 5000);
+        let mut pass = ImePass::new(egui::ViewportId::ROOT);
+        pass.frame(&mut app, vec![], true, false).expect("editing");
+        pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Preedit { text: "に".into(), active_range_chars: None })], true, false)
+            .expect("still editing");
+
+        // Still wider than the IME window limit, so this exercises the unavailable-text
+        // selection identity rather than merely making the surrounding text available.
+        app.session.execute("text.setSelection", json!({"start": 0, "end": 4500})).unwrap();
+        pass.frame(&mut app, vec![], true, false).expect("still editing");
+        assert!(read_reset(&pass.ctx).is_some(), "an application selection change retires the composition");
+        assert!(
+            matches!(pass.ctx.data(|d| d.get_temp::<ImeComposition>(ime_composition_id(pass.viewport))), Some(ImeComposition::Stale)),
+            "the old composition cannot follow the selection"
+        );
+        pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Commit("z".into()))], true, false).expect("still editing");
+        assert_eq!(doc_text(&app, lid), text, "the stale composition cannot mutate the wide selection");
     }
 
     #[test]
