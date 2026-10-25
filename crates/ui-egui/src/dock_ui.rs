@@ -447,20 +447,25 @@ impl EffectcraftApp {
     }
 
     /// Automation ids for craft-ui's gesture sources: `panel.tab.<Panel>`, `panel.drag.<Panel>`
-    /// (the group's drag bar), `panel.tabs.more.<Panel>`, `panel.header.<Panel>` (a stacked
-    /// panel's open/close button), `panel.float.<n>.move`, `.close`, `.resize` (bottom-right
+    /// (the group's drag bar), `panel.border.<Panel>` (the top border above its tabs),
+    /// `panel.tabs.more.<Panel>`, `panel.header.<Panel>` (a stacked panel's open/close button),
+    /// `panel.float.<n>.move`, `.close`, `.resize` (bottom-right
     /// corner) and `.resize.<Edge>`, `dock.gutter.<path>` (`a`/`b` per split level; a stack's gap
     /// below entry `i` adds `s<i>`), `dock.corner.<outer>.<inner>` where two dividers meet, and
     /// the same inside floating window `n` as `panel.float.<n>.gutter.…` and `.corner.…`.
     fn register_dock_hits(&mut self, hits: &[(Hit<PanelKind>, Rect)]) {
         let window = |panel: &PanelKind| self.ui.dock.layout.floating.iter().position(|window| window.contains(panel));
+        // Tabs are labelled as drawn: "Composition Intro", not "Composition".
+        let titles = self.tab_titles();
+        let title = |panel: &PanelKind| titles.iter().find(|(p, _)| p == panel).map_or_else(|| panel.title().to_string(), |(_, t)| t.clone());
         let mut found = Vec::new();
         for (hit, rect) in hits {
             let entry = match hit {
-                Hit::Tab(panel) => (format!("panel.tab.{}", panel.id()), panel.title().to_string()),
+                Hit::Tab(panel) => (format!("panel.tab.{}", panel.id()), title(panel)),
                 Hit::DragBar(panel) => (format!("panel.drag.{}", panel.id()), "Move panel group".into()),
+                Hit::Border(panel) => (format!("panel.border.{}", panel.id()), "Move panel group".into()),
                 Hit::Overflow(panel) => (format!("panel.tabs.more.{}", panel.id()), "More tabs".into()),
-                Hit::StackToggle(panel) => (format!("panel.header.{}", panel.id()), panel.title().to_string()),
+                Hit::StackToggle(panel) => (format!("panel.header.{}", panel.id()), title(panel)),
                 Hit::Title(panel) => match window(panel) {
                     Some(index) => (format!("panel.float.{index}.move"), "Move floating panel".into()),
                     None => continue,

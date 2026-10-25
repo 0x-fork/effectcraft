@@ -180,7 +180,8 @@ pub fn permissions(_panel: &PanelKind) -> Permissions {
 pub fn tabs(p: &[PanelKind], active: usize) -> Node<PanelKind> {
     Node::Tabs { panels: p.to_vec(), active }
 }
-/// Stacked panels: (panel, open, height).
+/// Stacked panels: (panel, open, height). Open entries share the stack's height in proportion to
+/// their heights; an entry without one counts as craft-ui's `DockStyle::min_pane` (40).
 pub fn stack(e: &[(PanelKind, bool, Option<f32>)]) -> Node<PanelKind> {
     Node::Stack { entries: e.iter().map(|&(panel, open, height)| StackEntry { panel, open, height }).collect() }
 }
