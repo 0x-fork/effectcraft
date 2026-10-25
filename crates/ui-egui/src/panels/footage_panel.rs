@@ -1,7 +1,8 @@
 //! The Footage panel (double-click footage in the Project panel): the source on its own time
 //! ruler, play / pause, In and Out marks, and the Edit Target buttons — Overlay Edit and Ripple
 //! Insert Edit — that cut the marked range into the active composition at its current time.
-//! Everything runs `footage.*` commands (state in `EditorState::footage_panel`).
+//! Time, marks and edits run `footage.*` commands (state in `EditorState::footage_panel`);
+//! the Play/Pause flag is local egui state.
 
 use crate::i18n::{tr, tr_args};
 use effectcraft_engine::project::{FootageKind, ItemKind};
@@ -17,7 +18,7 @@ use crate::theme::Tokens;
 /// per item, time and session revision), a ruler with the in/out span and CTI that scrubs on click
 /// or drag, Play/Pause, set In/Out, and Ripple Insert / Overlay Edit into the active comp. A solid
 /// shows its colour, footage without video says so, and an empty panel explains how to open one.
-/// Playback and time changes run `footage.*` commands, so the panel and agents share the state.
+/// Time changes run `footage.*` commands; the panel's Play/Pause flag is local egui state.
 pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let t = app.tokens;
     let ctx = ui.ctx().clone();
