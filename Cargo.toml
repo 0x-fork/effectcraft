@@ -11,8 +11,8 @@ rust-version = "1.95"
 repository = "https://github.com/storytold/effectcraft"
 
 [workspace.dependencies]
-craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "8a503cfe79f0a4e7da2e167e01e71155668e0cee", version = "=0.1.0", default-features = false, features = ["read"] }
-craft-docpath = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "8a503cfe79f0a4e7da2e167e01e71155668e0cee" }
+craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "a042cf265fea6ecf270fed588d026f157bf405d0", version = "=0.1.0", default-features = false, features = ["read"] }
+craft-docpath = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a042cf265fea6ecf270fed588d026f157bf405d0" }
 # internal
 effectcraft-time = { path = "crates/time" }
 effectcraft-geom = { path = "crates/geom" }
@@ -106,7 +106,7 @@ pollster = "0.4"
 
 # ui
 # Shared frontend components; keep this dependency above the engine boundary.
-craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "8a503cfe79f0a4e7da2e167e01e71155668e0cee", features = ["serde"] }
+craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a042cf265fea6ecf270fed588d026f157bf405d0", features = ["serde"] }
 egui = "0.36"
 eframe = { version = "0.36", default-features = false }
 egui_kittest = "0.36"
@@ -216,5 +216,5 @@ lto = "thin"
 codegen-units = 1
 
 [patch.crates-io]
-hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "8a503cfe79f0a4e7da2e167e01e71155668e0cee", version = "=0.7.2" }
-hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "8a503cfe79f0a4e7da2e167e01e71155668e0cee", version = "=0.3.0" }
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "a042cf265fea6ecf270fed588d026f157bf405d0", version = "=0.7.2" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "a042cf265fea6ecf270fed588d026f157bf405d0", version = "=0.3.0" }
