@@ -138,8 +138,8 @@ fn install_file_dialogs(app: &mut EffectcraftApp, ctx: &egui::Context) {
     let _ = (app, ctx);
 }
 
-/// Run the desktop app: parse arguments (`--version` exits before any file is written), install logging and the panic
-/// hook, attach the session log, scan fonts, honor the launch guard's backend choice and open the eframe window.
+/// Run a normal desktop launch: install logging and the panic hook, parse arguments (`--version` exits before the
+/// session log is attached), scan fonts, honor the launch guard's backend choice and open the eframe window.
 /// Builds the session, loads settings, plugins, the requested project/media and the optional control server, then
 /// reports startup failure through `startup_failed`. Returns the event loop's result.
 fn main() -> eframe::Result {
