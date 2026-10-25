@@ -248,7 +248,7 @@ pub(crate) fn edit_doc(
 ) -> Result<()> {
     let cid = s.active_comp_id().ok_or(EngineError::NoComp)?;
     let t = s.time();
-    s.edit(label, merge, |proj, st| {
+    s.edit_text_doc(label, merge, |proj, st| {
         let l = layer_mut(proj, cid, lid)?;
         let lt = l.layer_time(t);
         let pr = l.props.prop_mut("text/sourceText").ok_or_else(|| bad("text", "not a text layer"))?;
@@ -257,13 +257,19 @@ pub(crate) fn edit_doc(
             KV::Str(t) => TextDoc::plain(&t),
             _ => TextDoc::default(),
         };
-        let before = first_line_name(&doc.text);
+        let original = doc.clone();
         f(&mut doc, st)?;
-        let after = first_line_name(&doc.text);
-        pr.set_value_at(lt, KV::Text(Box::new(doc)));
-        // Text layers are named after their text until renamed.
-        if before != after && !after.is_empty() && (l.name == before || l.name.starts_with("Text") || l.name.is_empty()) {
-            l.name = after;
+        // A no-op (an IME deletion with nothing around the selection, a set to the value it
+        // already has) must not turn a static Str into Text or add a keyframe at the CTI: that
+        // would change the project and record an empty undo step.
+        if doc != original {
+            let before = first_line_name(&original.text);
+            let after = first_line_name(&doc.text);
+            pr.set_value_at(lt, KV::Text(Box::new(doc)));
+            // Text layers are named after their text until renamed.
+            if before != after && !after.is_empty() && (l.name == before || l.name.starts_with("Text") || l.name.is_empty()) {
+                l.name = after;
+            }
         }
         Ok(())
     })
@@ -674,12 +680,51 @@ pub(crate) fn invalidate_session(s: &mut Session) {
     }
 }
 
-/// Keep the session valid after undo / external edits: clamp the selection, drop it when the
+/// Clamp the editor selection and give it a fresh IME epoch after its document was replaced.
+///
+/// This is the one replacement path for document changes outside `edit_doc`:
+/// [`crate::Session::edit`] calls [`after_external_change`] after every edit, [`crate::Session::set_time`]
+/// and [`crate::Session::sync_related_times`] call it after moving the CTI, and
+/// [`crate::Session::sanitize_after_replacement`] calls it when it restores a whole document.
+/// Clamping first means a shortened document leaves the caret in range, so the next Backspace
+/// deletes instead of being swallowed by an out-of-range selection.
+pub(crate) fn document_replaced(s: &mut Session) {
+    sanitize(s);
+    invalidate_session(s);
+}
+
+/// The document the active on-canvas editor is showing, with its layer.
+///
+/// [`crate::Session::edit`] and the time setters snapshot this before a change and compare it
+/// afterwards: only a change that actually replaces this document starts a new epoch, while a
+/// write to another property, layer or composition, a move to a time showing the same text, or a
+/// write that leaves the text as it was, keeps the editor's owner. With no editor open this is a
+/// single `Option` check, with no document copy.
+pub(crate) fn active_editor_doc(s: &Session) -> Option<(LayerId, TextDoc)> {
+    let e = s.state.text_edit.as_ref()?;
+    Some((e.layer, layer_doc(s, e.layer)?))
+}
+
+/// Finish a change outside the editor: if it replaced the document the editor owned, clamp the
+/// selection and start a new IME epoch.
+pub(crate) fn after_external_change(s: &mut Session, before: Option<&(LayerId, TextDoc)>) {
+    let Some((lid, before)) = before else { return };
+    // The change ended the editor or moved it to another layer: that path owns its own session.
+    if !s.state.text_edit.as_ref().is_some_and(|e| e.layer == *lid) {
+        return;
+    }
+    if layer_doc(s, *lid).as_ref() != Some(before) {
+        document_replaced(s);
+    }
+}
+
+/// Keep the session valid after routine state cleanup: clamp the selection, drop it when the
 /// layer is gone or not in the active comp.
 ///
-/// Any call to this function follows an undo/redo, a project-level deletion or a rolled-back
-/// batch. The document may have been replaced even when the same layer id exists again, so the
-/// composition epoch is advanced before the session is kept.
+/// This is also called after project-item cleanup that leaves the edited document alone, so it
+/// must not advance [`TextEdit::session`]: that would make the viewer treat unrelated cleanup as
+/// a document replacement and interrupt the active IME composition. Replacement paths call
+/// [`document_replaced`] instead.
 pub(crate) fn sanitize(s: &mut Session) {
     let Some(e) = s.state.text_edit.clone() else { return };
     match layer_doc(s, e.layer) {
@@ -688,7 +733,6 @@ pub(crate) fn sanitize(s: &mut Session) {
             if let Some(ed) = s.state.text_edit.as_mut() {
                 ed.anchor = ed.anchor.min(n);
                 ed.caret = ed.caret.min(n);
-                ed.session = next_edit_session();
             }
         }
         None => s.state.text_edit = None,

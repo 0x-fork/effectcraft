@@ -1402,11 +1402,37 @@ impl EffectcraftApp {
         let video = plan.is_none_or(|p| p.video);
         // Prefetch ahead.
         let cur = fr.frame_at(self.session.time());
-        // While paused (scrubbing, editing) the viewer's frame comes first: prefetch only a few
-        // frames, only once it is done, and not while edits keep coming (a layer dragged in the
-        // viewer): those frames would be stale at the next step and would hold the CPU and GPU
-        // the next viewer frame needs.
-        let ahead = if self.playback.playing {
+        let ahead = self.prefetch_ahead(ctx, now);
+        let queued = self.frames.inflight();
+        let series = self.frame_series(cid, scale);
+        // The preview's position orders prefetch and eviction (#595).
+        let playhead = plan.filter(|p| p.video).map(|p| frames::Playhead { series, cur, start: p.start, end: p.end, step: p.step, looping: p.looping });
+        self.frames.set_playhead(playhead);
+        if self.cache_preview(ctx, &c, cid, scale, now, fr, series, plan, ahead, queued) {
+            return;
+        }
+        let step = plan.map_or(1, |p| p.step);
+        let fit_ahead = self.frames_that_fit(&c, scale) - 1;
+        self.prefetch_playback(cid, scale, plan, cur, wa, wb, ahead, fit_ahead, series, queued, video);
+        self.pump_meters(ctx, now);
+        if !self.playback.playing {
+            self.cache_when_idle(ctx, &c, &series, now, input_active, (wa, wb));
+            return;
+        }
+        let fit = self.frames_that_fit(&c, scale);
+        self.start_held_audio(now, plan, series, cur, ahead, fit, fr);
+        if self.advance_audio_clock(ctx, now, series, wa, wb, video, fr, cur, step) {
+            return;
+        }
+        self.advance_frame_clock(ctx, now, plan, video, looping, wa, wb, fr, cur, step, series);
+    }
+
+    /// While paused (scrubbing, editing) the viewer's frame comes first: prefetch only a few
+    /// frames, only once it is done, and not while edits keep coming (a layer dragged in the
+    /// viewer): those frames would be stale at the next step and would hold the CPU and GPU
+    /// the next viewer frame needs.
+    fn prefetch_ahead(&mut self, ctx: &egui::Context, now: f64) -> i64 {
+        if self.playback.playing {
             (self.frames_parallelism() * 2).max(4) as i64
         } else if self.frames.urgent_pending() {
             0
@@ -1417,59 +1443,83 @@ impl EffectcraftApp {
             // Keep workers available for a newly edited viewer frame. Running obsolete
             // background renders cannot be preempted by the priority queue.
             self.frames_parallelism().saturating_sub(1).min(2) as i64
-        };
-        let mut queued = self.frames.inflight();
-        let series = self.frame_series(cid, scale);
-        // The preview's position orders prefetch and eviction (#595).
-        let playhead = plan.filter(|p| p.video).map(|p| frames::Playhead { series, cur, start: p.start, end: p.end, step: p.step, looping: p.looping });
-        self.frames.set_playhead(playhead);
-        if self.playback.caching
-            && let Some(p) = plan
-        {
-            // Cache Before Playback: the range in play order, then start the clock. A range
-            // larger than the RAM preview budget is cut to the frames that fit (caching more
-            // would evict the first ones and never finish).
-            let mut all = true;
-            let n = (p.end - p.start) / p.step + 1;
-            let fit = self.frames_that_fit(&c, scale);
-            if n > fit {
-                let mut cut = p;
-                (cut.start, cut.end) = (p.first, (p.first + (fit - 1) * p.step).min(p.end));
-                self.playback.plan = Some(cut);
-                self.toast = Some((format!("Preview cut to {fit} of {n} frames: no more fit in the RAM preview (Settings ▸ Memory & CPU)"), now));
-                ctx.request_repaint();
-                return;
-            }
-            let order: Vec<i64> = (0..n).filter_map(|k| p.frame_after(p.first, k)).collect();
-            for f in order {
-                if self.frames.is_cached(&FrameKey { frame: f, ..series }) {
-                    continue;
-                }
-                all = false;
-                if queued < ahead as usize {
-                    self.request_frame(cid, f, scale);
-                    queued += 1;
-                }
-            }
-            self.playback.waiting = !all;
-            if all {
-                self.playback.caching = false;
-                self.playback.start_wall = now;
-                self.playback.start_frame = p.first;
-                self.session.set_time(fr.tick_of(p.first));
-                self.start_audio(fr.tick_of(p.first));
-            }
-            ctx.request_repaint();
-            return;
         }
-        let step = plan.map_or(1, |p| p.step);
-        // Never further ahead than the RAM preview holds: those frames would evict the ones the
-        // preview shows first, or be evicted before it gets there (#595). The window starts at the
-        // first uncached frame ahead: after a loop or a restart the frames just ahead are cached,
-        // and a window from the playhead left the workers idle until it came near the end of the
-        // cached run. It stays ahead × 3 frames wide: workers spread over the whole preview render
-        // frames with different layers at once (on the GPU, an atlas each: #1812).
-        let fit_ahead = self.frames_that_fit(&c, scale) - 1;
+    }
+
+    /// Cache Before Playback: the range in play order, then start the clock. A range larger than
+    /// the RAM preview budget is cut to the frames that fit (caching more would evict the first
+    /// ones and never finish). Returns true when this pass handled the preview.
+    fn cache_preview(
+        &mut self,
+        ctx: &egui::Context,
+        comp: &effectcraft_engine::project::Comp,
+        cid: ItemId,
+        scale: f64,
+        now: f64,
+        fr: effectcraft_engine::time::FrameRate,
+        series: FrameKey,
+        plan: Option<effectcraft_engine::preview::PreviewPlan>,
+        ahead: i64,
+        mut queued: usize,
+    ) -> bool {
+        if !self.playback.caching {
+            return false;
+        }
+        let Some(p) = plan else { return false };
+        let mut all = true;
+        let n = (p.end - p.start) / p.step + 1;
+        let fit = self.frames_that_fit(comp, scale);
+        if n > fit {
+            let mut cut = p;
+            (cut.start, cut.end) = (p.first, (p.first + (fit - 1) * p.step).min(p.end));
+            self.playback.plan = Some(cut);
+            self.toast = Some((format!("Preview cut to {fit} of {n} frames: no more fit in the RAM preview (Settings ▸ Memory & CPU)"), now));
+            ctx.request_repaint();
+            return true;
+        }
+        let order: Vec<i64> = (0..n).filter_map(|k| p.frame_after(p.first, k)).collect();
+        for f in order {
+            if self.frames.is_cached(&FrameKey { frame: f, ..series }) {
+                continue;
+            }
+            all = false;
+            if queued < ahead as usize {
+                self.request_frame(cid, f, scale);
+                queued += 1;
+            }
+        }
+        self.playback.waiting = !all;
+        if all {
+            self.playback.caching = false;
+            self.playback.start_wall = now;
+            self.playback.start_frame = p.first;
+            self.session.set_time(fr.tick_of(p.first));
+            self.start_audio(fr.tick_of(p.first));
+        }
+        ctx.request_repaint();
+        true
+    }
+
+    /// Never further ahead than the RAM preview holds: those frames would evict the ones the
+    /// preview shows first, or be evicted before it gets there (#595). The window starts at the
+    /// first uncached frame ahead: after a loop or a restart the frames just ahead are cached,
+    /// and a window from the playhead left the workers idle until it came near the end of the
+    /// cached run. It stays ahead × 3 frames wide: workers spread over the whole preview render
+    /// frames with different layers at once (on the GPU, an atlas each: #1812).
+    fn prefetch_playback(
+        &self,
+        cid: ItemId,
+        scale: f64,
+        plan: Option<effectcraft_engine::preview::PreviewPlan>,
+        cur: i64,
+        wa: i64,
+        wb: i64,
+        ahead: i64,
+        fit_ahead: i64,
+        series: FrameKey,
+        mut queued: usize,
+        video: bool,
+    ) {
         let frame = |k: i64| match plan {
             Some(p) => p.frame_after(cur, k),
             None => {
@@ -1496,6 +1546,9 @@ impl EffectcraftApp {
                 queued += 1;
             }
         }
+    }
+
+    fn pump_meters(&mut self, ctx: &egui::Context, now: f64) {
         if let Some(a) = &mut self.audio {
             a.pump();
             self.meter.update(a.feed.take_peaks(), now);
@@ -1511,57 +1564,97 @@ impl EffectcraftApp {
             self.meter.update([0.0; 2], now);
             ctx.request_repaint();
         }
-        if !self.playback.playing {
-            self.cache_when_idle(ctx, &c, &series, now, input_active, (wa, wb));
+    }
+
+    /// Held sound starts once the frames ahead are cached (see `Playback::audio_held`): the
+    /// prefetch window when the silent preview keeps real time, else the rest of the preview.
+    fn start_held_audio(
+        &mut self,
+        now: f64,
+        plan: Option<effectcraft_engine::preview::PreviewPlan>,
+        series: FrameKey,
+        cur: i64,
+        ahead: i64,
+        fit: i64,
+        fr: effectcraft_engine::time::FrameRate,
+    ) {
+        if !self.playback.audio_held {
             return;
         }
-        let snap = |f: i64| wa + (f - wa).div_euclid(step) * step;
-        // Held sound starts once the frames ahead are cached (see `Playback::audio_held`): the
-        // prefetch window when the silent preview keeps real time, else the rest of the preview.
-        let fit = self.frames_that_fit(&c, scale);
-        if self.playback.audio_held
-            && let Some(p) = plan
-            && ((self.playback.keeps_up(now) && self.cached_ahead(&p, &series, cur, ahead.min(fit))) || self.cached_ahead(&p, &series, cur, fit))
-        {
+        let Some(p) = plan else { return };
+        if (self.playback.keeps_up(now) && self.cached_ahead(&p, &series, cur, ahead.min(fit))) || self.cached_ahead(&p, &series, cur, fit) {
             self.playback.audio_held = false;
             self.playback.start_wall = now;
             self.playback.start_frame = cur;
             self.start_audio(fr.tick_of(cur));
         }
-        // Audio clock drives playback: show the frame under the audible sample.
-        if let Some(a) = &self.audio {
-            if a.finished() {
-                if video {
-                    self.session.set_time(fr.tick_of(wb));
-                } else {
-                    self.playback.audio_frame = Some(wb);
-                }
-                self.stop();
-                return;
-            }
-            let target = snap(audio::frame_of_sample(a.clock(), a.rate, fr).clamp(wa, wb));
-            if !video {
-                self.playback.audio_frame = Some(target);
-            } else if self.frames.is_cached(&FrameKey { frame: target, ..series }) {
-                self.playback.waiting = false;
-                if target != cur {
-                    self.session.set_time(fr.tick_of(target));
-                    self.playback.frame_shown(now);
-                }
+    }
+
+    /// Audio clock drives playback: show the frame under the audible sample. Returns true when
+    /// the audio path handled this pass (including stopping at the end).
+    fn advance_audio_clock(
+        &mut self,
+        ctx: &egui::Context,
+        now: f64,
+        series: FrameKey,
+        wa: i64,
+        wb: i64,
+        video: bool,
+        fr: effectcraft_engine::time::FrameRate,
+        cur: i64,
+        step: i64,
+    ) -> bool {
+        let Some(a) = &self.audio else { return false };
+        if a.finished() {
+            if video {
+                self.session.set_time(fr.tick_of(wb));
             } else {
-                // Rendering can't keep up: rather than skip frames, the sound stops and every
-                // frame shows as it renders until the frames ahead are cached again.
-                self.audio = None;
-                self.playback.audio_held = true;
-                self.playback.waiting = true;
-                // The rate measured before the stall no longer says it keeps up.
-                self.playback.shown_at.clear();
-                self.playback.start_wall = now;
-                self.playback.start_frame = cur;
+                self.playback.audio_frame = Some(wb);
             }
-            ctx.request_repaint();
-            return;
+            self.stop();
+            return true;
         }
+        let snap = |f: i64| wa + (f - wa).div_euclid(step) * step;
+        let target = snap(audio::frame_of_sample(a.clock(), a.rate, fr).clamp(wa, wb));
+        if !video {
+            self.playback.audio_frame = Some(target);
+        } else if self.frames.is_cached(&FrameKey { frame: target, ..series }) {
+            self.playback.waiting = false;
+            if target != cur {
+                self.session.set_time(fr.tick_of(target));
+                self.playback.frame_shown(now);
+            }
+        } else {
+            // Rendering can't keep up: rather than skip frames, the sound stops and every
+            // frame shows as it renders until the frames ahead are cached again.
+            self.audio = None;
+            self.playback.audio_held = true;
+            self.playback.waiting = true;
+            // The rate measured before the stall no longer says it keeps up.
+            self.playback.shown_at.clear();
+            self.playback.start_wall = now;
+            self.playback.start_frame = cur;
+        }
+        ctx.request_repaint();
+        true
+    }
+
+    /// The wall clock advances the preview when no audio device drives it, and shows the target
+    /// frame (or holds when it is not cached yet).
+    fn advance_frame_clock(
+        &mut self,
+        ctx: &egui::Context,
+        now: f64,
+        plan: Option<effectcraft_engine::preview::PreviewPlan>,
+        video: bool,
+        looping: bool,
+        wa: i64,
+        wb: i64,
+        fr: effectcraft_engine::time::FrameRate,
+        cur: i64,
+        step: i64,
+        series: FrameKey,
+    ) {
         let elapsed = now - self.playback.start_wall;
         // The plan carries the rate the preview was started with (and `play_with` copies it to
         // `Playback::fps`). Deriving the frame from the plan keeps a logic-only tick correct even
@@ -1919,9 +2012,23 @@ impl EffectcraftApp {
     /// viewport, and everything that can write a file or reply happens here, on the app thread.
     fn tick_screenshots(&mut self, ctx: &egui::Context) {
         let Some(geom) = self.current_geometry(ctx) else { return };
-        // 1. Drain completed slots. A completion whose surface epoch changed since issuance is
-        //    discarded even if the geometry changed back: it was cropped with another frame's
-        //    pixels-per-point.
+        self.drain_completed_screenshots(geom);
+        self.timeout_screenshots();
+        self.issue_screenshots(ctx, geom);
+        // 4. Wake up for the earliest deadline even when no further pass is otherwise needed: an
+        //    issued capture whose callback never arrives (hidden window, display asleep, renderer
+        //    failure) would otherwise never reach its timeout. This is a timer, not a paint
+        //    request: the issued screenshot command already forces the frame it needs.
+        if let Some(next) = self.pending_screenshots.iter().map(|s| s.deadline).reduce(f64::min) {
+            let wait = (next - self.now).max(0.001);
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        }
+    }
+
+    /// 1. Drain completed slots. A completion whose surface epoch changed since issuance is
+    ///    discarded even if the geometry changed back: it was cropped with another frame's
+    ///    pixels-per-point.
+    fn drain_completed_screenshots(&mut self, geom: DrawGeometry) {
         let mut i = 0;
         while i < self.pending_screenshots.len() {
             let taken = self.pending_screenshots.get(i).and_then(|s| s.slot.as_ref()).and_then(craft_ui::capture::CaptureSlot::take);
@@ -1977,7 +2084,10 @@ impl EffectcraftApp {
                 }
             }
         }
-        // 2. Timeouts: a late callback finds its slot cancelled and writes nothing.
+    }
+
+    /// 2. Timeouts: a late callback finds its slot cancelled and writes nothing.
+    fn timeout_screenshots(&mut self) {
         let mut i = 0;
         while i < self.pending_screenshots.len() {
             if self.now > self.pending_screenshots[i].deadline {
@@ -1986,8 +2096,11 @@ impl EffectcraftApp {
                 i += 1;
             }
         }
-        // 3. Issue settled requests. The command itself requests the paint; a request still
-        //    waiting for its passes needs `want_paint` so a hidden window keeps painting.
+    }
+
+    /// 3. Issue settled requests. The command itself requests the paint; a request still
+    ///    waiting for its passes needs `want_paint` so a hidden window keeps painting.
+    fn issue_screenshots(&mut self, ctx: &egui::Context, geom: DrawGeometry) {
         let mut i = 0;
         while i < self.pending_screenshots.len() {
             if self.pending_screenshots[i].slot.is_some() {
@@ -2037,14 +2150,6 @@ impl EffectcraftApp {
             s.issued = Some(geom);
             s.crop = crop;
             i += 1;
-        }
-        // 4. Wake up for the earliest deadline even when no further pass is otherwise needed: an
-        //    issued capture whose callback never arrives (hidden window, display asleep, renderer
-        //    failure) would otherwise never reach its timeout. This is a timer, not a paint
-        //    request: the issued screenshot command already forces the frame it needs.
-        if let Some(next) = self.pending_screenshots.iter().map(|s| s.deadline).reduce(f64::min) {
-            let wait = (next - self.now).max(0.001);
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
         }
     }
 

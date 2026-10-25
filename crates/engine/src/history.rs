@@ -347,7 +347,7 @@ impl Session {
         self.history.redo = redo;
         self.history.branches = branches;
         self.history.merge_key = None;
-        self.sanitize_state();
+        self.sanitize_after_replacement();
         self.bump();
         true
     }

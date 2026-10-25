@@ -1481,7 +1481,9 @@ fn set_text(s: &mut Session, p: &Value) -> Result<Value> {
         }
         s.bump();
     }
-    let replacing_text = p.get("text").is_some() && s.state.text_edit.as_ref().is_some_and(|e| e.layer == lid);
+    // A changed Source Text is handled by `Session::edit`: its boundary clamps the selection and
+    // starts a new IME epoch only when the CTI document actually changed, so an identical text
+    // write stays a no-op and keeps the editor's owner.
     s.edit("Edit Text", merge_p(p), |proj, _| {
         let l = layer_mut(proj, cid, lid)?;
         let lt = l.layer_time(t);
@@ -1502,9 +1504,6 @@ fn set_text(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(())
     })?;
-    if replacing_text {
-        super::text_edit::invalidate_session(s);
-    }
     Ok(Value::Null)
 }
 

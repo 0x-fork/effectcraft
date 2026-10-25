@@ -78,7 +78,7 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
                     s.project = project;
                     s.history = history;
                     s.state = state;
-                    s.sanitize_state();
+                    s.sanitize_after_replacement();
                     s.bump();
                     "; the batch was rolled back (nothing changed)".to_string()
                 } else {

@@ -260,9 +260,11 @@ pub fn finish(app: &mut EffectcraftApp, ok: bool) {
         let changed = !std::sync::Arc::ptr_eq(&app.session.project, &checkpoint.project);
         app.session.project = checkpoint.project;
         app.session.history = checkpoint.history;
-        app.session.sanitize_state();
         if changed {
+            app.session.sanitize_after_replacement();
             app.session.bump();
+        } else {
+            app.session.sanitize_state();
         }
     }
     app.session.history.merge_key = None;

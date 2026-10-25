@@ -686,7 +686,25 @@ impl Session {
     }
 
     /// Apply an undoable edit. `merge`: consecutive edits with the same key fold into one step.
+    ///
+    /// Every edit is an external boundary for the on-canvas text editor: if it replaced the
+    /// document the editor is showing, the selection is clamped and the editor gets a fresh IME
+    /// epoch. The editor's own typing goes through `edit_text_doc`, which owns that
+    /// document and must not treat its own keystrokes as a replacement.
     pub fn edit<T>(&mut self, label: &str, merge: Option<&str>, f: impl FnOnce(&mut Project, &mut EditorState) -> Result<T>) -> Result<T> {
+        let edited = commands::text_edit::active_editor_doc(self);
+        let out = self.edit_inner(label, merge, f)?;
+        commands::text_edit::after_external_change(self, edited.as_ref());
+        Ok(out)
+    }
+
+    /// [`Session::edit`] for the on-canvas editor's own text changes. Its document is the one
+    /// the editor owns, so a change here is typing, not a replacement behind the IME's back.
+    pub(crate) fn edit_text_doc<T>(&mut self, label: &str, merge: Option<&str>, f: impl FnOnce(&mut Project, &mut EditorState) -> Result<T>) -> Result<T> {
+        self.edit_inner(label, merge, f)
+    }
+
+    fn edit_inner<T>(&mut self, label: &str, merge: Option<&str>, f: impl FnOnce(&mut Project, &mut EditorState) -> Result<T>) -> Result<T> {
         let before = self.project.clone();
         let mut p = (*self.project).clone();
         let mut st = self.state.clone();
@@ -809,7 +827,7 @@ impl Session {
         self.keep_view_settings(&cur);
         self.history.redo.push((label, cur));
         self.history.merge_key = None;
-        self.sanitize_state();
+        self.sanitize_after_replacement();
         self.bump();
         true
     }
@@ -820,9 +838,17 @@ impl Session {
         self.keep_view_settings(&cur);
         self.history.undo.push((label, cur));
         self.history.merge_key = None;
-        self.sanitize_state();
+        self.sanitize_after_replacement();
         self.bump();
         true
+    }
+
+    /// Keep selections valid after the project was replaced by another state (undo, redo, a
+    /// history jump, a rollback): the same layer id can name a different document, so the
+    /// on-canvas editor gets a fresh IME epoch.
+    pub fn sanitize_after_replacement(&mut self) {
+        self.sanitize_state();
+        commands::text_edit::document_replaced(self);
     }
 
     /// Drop selections that no longer exist. Each comp keeps its own selection (#1001); a layer id
@@ -900,13 +926,22 @@ impl Session {
         self.state.active_comp.and_then(|c| self.state.times.get(&c).copied()).unwrap_or(Tick::ZERO)
     }
 
+    /// Move the active comp's current time.
+    ///
+    /// Time is an external boundary for the on-canvas text editor too: an animated Source Text
+    /// can show a different document at another time. The document is snapshotted only while an
+    /// editor is open, so playback with no text editor does no text copying.
     pub fn set_time(&mut self, t: Tick) {
         if let Some(c) = self.state.active_comp {
             let t = self.project.comp(c).map_or(t, |comp| comp_frame_at(comp, t));
+            let edited = commands::text_edit::active_editor_doc(self);
             self.state.times.insert(c, t);
             if self.prefs.general.sync_time_related_items {
-                self.sync_related_times(c, t);
+                // Direct call: this `set_time` owns the editor snapshot for both time changes,
+                // so a synced move does not take a second snapshot or start a second epoch.
+                self.sync_related_times_inner(c, t);
             }
+            commands::text_edit::after_external_change(self, edited.as_ref());
         }
     }
 
@@ -914,6 +949,14 @@ impl Session {
     /// `comp` moves the current time of the comps nested in it (through their precomp layers'
     /// timing) and of the comps it is nested in, so every related viewer shows the same moment.
     pub fn sync_related_times(&mut self, comp: ItemId, t: Tick) {
+        // Moving a related comp can move the active one, so the editor's document is checked
+        // here too; the snapshot is skipped entirely when no text editor is open.
+        let edited = commands::text_edit::active_editor_doc(self);
+        self.sync_related_times_inner(comp, t);
+        commands::text_edit::after_external_change(self, edited.as_ref());
+    }
+
+    fn sync_related_times_inner(&mut self, comp: ItemId, t: Tick) {
         let mut seen = std::collections::BTreeSet::from([comp]);
         let mut todo = vec![(comp, t)];
         let mut found = vec![];

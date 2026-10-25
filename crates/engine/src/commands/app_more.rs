@@ -38,7 +38,7 @@ pub(crate) fn grouped<T>(s: &mut Session, label: &str, f: impl FnOnce(&mut Sessi
         Err(e) => {
             if changed {
                 s.project = before;
-                s.sanitize_state();
+                s.sanitize_after_replacement();
                 s.bump();
             }
             Err(e)

@@ -236,6 +236,260 @@ fn ime_session_epoch_tracks_replaced_text_and_layer_restoration() {
 }
 
 #[test]
+fn no_op_ime_deletion_keeps_a_static_plain_text_value_and_records_no_step() {
+    use effectcraft_keyframe::Value as KV;
+    let (mut s, t) = session("abc");
+    // Legacy/imported text can still be stored as a plain Str rather than a TextDoc.
+    let cid = s.active_comp_id().unwrap();
+    let pr = std::sync::Arc::make_mut(&mut s.project)
+        .comp_mut(cid)
+        .unwrap()
+        .layer_mut(effectcraft_project::LayerId(t))
+        .unwrap()
+        .props
+        .prop_mut("text/sourceText")
+        .unwrap();
+    pr.value = KV::Str("abc".into());
+    s.execute("text.edit", json!({"layer": t, "caret": 0})).unwrap();
+    let steps = s.history.undo.len();
+
+    // A non-zero before count at the document start deletes nothing.
+    s.execute("text.deleteSurrounding", json!({"before": 1, "after": 0})).unwrap();
+
+    let pr = s.active_comp().unwrap().layer(effectcraft_project::LayerId(t)).unwrap().props.prop("text/sourceText").unwrap();
+    assert!(matches!(&pr.value, KV::Str(_)), "a no-op keeps the static Str variant");
+    assert!(pr.keys.is_empty());
+    assert_eq!(s.history.undo.len(), steps, "a no-op adds no undo step");
+}
+
+#[test]
+fn no_op_ime_deletion_does_not_add_a_keyframe_to_animated_source_text() {
+    let (mut s, t) = session("abc");
+    s.execute("text.edit", json!({"layer": t, "caret": 0})).unwrap();
+    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
+    let lid = effectcraft_project::LayerId(t);
+    let keys = |s: &Session| s.active_comp().unwrap().layer(lid).unwrap().props.prop("text/sourceText").unwrap().keys.len();
+    assert_eq!(keys(&s), 1, "one key from the stopwatch");
+    s.execute("time.set", json!({"time": 1.0})).unwrap();
+    let steps = s.history.undo.len();
+
+    // A non-zero before count at the document start deletes nothing, at a time with no key.
+    s.execute("text.deleteSurrounding", json!({"before": 1, "after": 0})).unwrap();
+
+    assert_eq!(keys(&s), 1, "a no-op does not key Source Text at the CTI");
+    assert_eq!(s.history.undo.len(), steps, "a no-op adds no undo step");
+}
+
+#[test]
+fn property_writes_replace_the_edited_document_only_when_the_text_changes() {
+    let (mut s, t) = session("abc");
+    let other = s.execute("layer.newText", json!({"text": "other"})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
+    let owner = s.state.text_edit.as_ref().unwrap().session;
+    let steps = s.history.undo.len();
+
+    // Writing the text the document already has is a no-op: same document, same owner, no step.
+    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "value": "abc"})).unwrap();
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "a no-op write keeps the IME owner");
+    assert_eq!(s.history.undo.len(), steps, "a no-op write records no undo step");
+    s.execute("layer.setText", json!({"layer": t, "text": "abc"})).unwrap();
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "a no-op layer.setText keeps the IME owner");
+    assert_eq!(s.history.undo.len(), steps, "a no-op layer.setText records no undo step");
+
+    // Another property of the edited layer leaves its document alone.
+    s.execute("prop.set", json!({"layer": t, "path": "transform/opacity", "value": 50})).unwrap();
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "an unrelated property keeps the IME owner");
+
+    // Source Text of another layer is not the editor's document either.
+    s.execute("prop.set", json!({"layer": other, "path": "text/sourceText", "value": "changed"})).unwrap();
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "another layer's text keeps the IME owner");
+
+    // Replacing the edited layer's Source Text is a document replacement: a new IME epoch.
+    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "value": "replaced"})).unwrap();
+    assert_eq!(doc(&s, t).text, "replaced");
+    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "replacing the document changes the IME owner");
+}
+
+#[test]
+fn a_replacing_property_write_clamps_the_selection_so_the_next_backspace_deletes() {
+    let (mut s, t) = session("abcdef");
+    s.execute("text.edit", json!({"layer": t, "caret": 6})).unwrap();
+    let owner = s.state.text_edit.as_ref().unwrap().session;
+
+    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "value": "a"})).unwrap();
+    assert_eq!(doc(&s, t).text, "a");
+    assert_eq!(sel(&s), (1, 1), "the shortened document leaves the caret in range");
+    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner);
+
+    // Backspace at the clamped caret removes the character instead of no-opping on 5..6.
+    s.execute("text.delete", json!({})).unwrap();
+    assert_eq!(doc(&s, t).text, "");
+    assert_eq!(sel(&s), (0, 0));
+}
+
+#[test]
+fn keyframe_writes_on_source_text_replace_the_edited_document_only_when_the_cti_value_changes() {
+    let (mut s, t) = session("abc");
+    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
+    // Keying the text the CTI already shows leaves the document equal.
+    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
+    let owner = s.state.text_edit.as_ref().unwrap().session;
+
+    s.execute("keys.set", json!({"layer": t, "path": "text/sourceText", "time": 0.0, "value": "abc"})).unwrap();
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "a no-op key write keeps the IME owner");
+
+    // `keys.set` changes the key at the CTI: a document replacement.
+    s.execute("keys.set", json!({"layer": t, "path": "text/sourceText", "time": 0.0, "value": "replaced"})).unwrap();
+    assert_eq!(doc(&s, t).text, "replaced");
+    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "a changed keyframe changes the IME owner");
+}
+
+#[test]
+fn deleting_the_cti_keyframe_first_replaces_the_document_then_the_last_key_is_a_noop() {
+    let (mut s, t) = session("abc");
+    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
+    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
+    s.execute("prop.addKey", json!({"layer": t, "path": "text/sourceText", "time": 1.0, "value": "later"})).unwrap();
+    let owner = s.state.text_edit.as_ref().unwrap().session;
+    let lid = effectcraft_project::LayerId(t);
+    let pr = s.active_comp().unwrap().layer(lid).unwrap().props.prop("text/sourceText").unwrap();
+    let uid = pr.uid;
+    let times: Vec<_> = pr.keys.iter().map(|k| k.time).collect();
+    assert_eq!(times.len(), 2);
+
+    // Deleting the key at the CTI (0s) while the 1s key remains shows the later text: replacing
+    // the document starts a new epoch.
+    s.state.selected_keys = vec![crate::KeyRef { layer: lid, prop: uid, time: times[0] }];
+    assert_eq!(s.execute("keys.delete", json!({})).unwrap(), json!(1));
+    assert_eq!(doc(&s, t).text, "later");
+    let replaced = s.state.text_edit.as_ref().unwrap().session;
+    assert_ne!(replaced, owner, "deleting the CTI key changed the document");
+
+    // Removing the last key turns its value into the static CTI value. That value is what the
+    // CTI already showed, so the document does not change and the new owner stays.
+    s.state.selected_keys = vec![crate::KeyRef { layer: lid, prop: uid, time: times[1] }];
+    assert_eq!(s.execute("keys.delete", json!({})).unwrap(), json!(1));
+    assert_eq!(doc(&s, t).text, "later");
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, replaced, "removing the last key is a document no-op");
+}
+
+#[test]
+fn moving_the_cti_to_a_shorter_animated_key_clamps_and_starts_a_new_epoch() {
+    let (mut s, t) = session("abcdef");
+    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
+    s.execute("prop.addKey", json!({"layer": t, "path": "text/sourceText", "time": 1.0, "value": "a"})).unwrap();
+    s.execute("text.edit", json!({"layer": t, "caret": 6})).unwrap();
+    let owner = s.state.text_edit.as_ref().unwrap().session;
+
+    // The same time still shows the same document: no new epoch.
+    s.execute("time.set", json!({"time": 0.0})).unwrap();
+    assert_eq!(doc(&s, t).text, "abcdef");
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "an unchanged CTI document keeps the IME owner");
+
+    // The key at 1s holds shorter text: the document changes, the selection is clamped and the
+    // editor gets a new epoch.
+    s.execute("time.set", json!({"time": 1.0})).unwrap();
+    assert_eq!(doc(&s, t).text, "a");
+    assert_eq!(sel(&s), (1, 1), "the shortened document leaves the caret in range");
+    let replaced = s.state.text_edit.as_ref().unwrap().session;
+    assert_ne!(replaced, owner, "a changed CTI document starts a new IME epoch");
+
+    // Backspace at the clamped caret removes the character instead of no-opping on 5..6.
+    s.execute("text.delete", json!({})).unwrap();
+    assert_eq!(doc(&s, t).text, "");
+    assert_eq!(sel(&s), (0, 0));
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, replaced, "typing after the replacement keeps its owner");
+
+    // Staying at the same time after the edit is a no-op for the document too.
+    s.execute("time.set", json!({"time": 1.0})).unwrap();
+    assert_eq!(doc(&s, t).text, "");
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, replaced, "a no-op time move keeps the IME owner");
+}
+
+#[test]
+fn sync_related_times_replaces_the_edited_document_when_it_moves_the_active_comp() {
+    let (mut s, t) = session("abcdef");
+    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
+    s.execute("prop.addKey", json!({"layer": t, "path": "text/sourceText", "time": 1.0, "value": "a"})).unwrap();
+    let outer = s.active_comp_id().unwrap();
+    let r = s.execute("layer.precompose", json!({"layers": [t], "name": "Inner", "open": true})).unwrap();
+    let inner = effectcraft_project::ItemId(r["comp"].as_u64().unwrap());
+    assert_eq!(s.active_comp_id(), Some(inner));
+
+    s.execute("text.edit", json!({"layer": t, "caret": 6})).unwrap();
+    let owner = s.state.text_edit.as_ref().unwrap().session;
+    s.sync_related_times(outer, effectcraft_time::Tick::from_seconds_f64(1.0));
+
+    assert_eq!(doc(&s, t).text, "a");
+    assert_eq!(sel(&s), (1, 1), "the related time move clamps the selection");
+    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "the related time move changed the document");
+}
+
+#[test]
+fn applying_a_preset_that_writes_source_text_replaces_the_edited_document() {
+    let (mut s, t) = session("abc");
+    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
+    let owner = s.state.text_edit.as_ref().unwrap().session;
+    let preset = json!({
+        "effectcraftAnimationPreset": 1,
+        "properties": [{"path": "text/sourceText", "value": {"t": "Text", "v": {"text": "replaced"}}, "keys": []}],
+    });
+    s.execute("anim.applyPreset", json!({"preset": preset, "layers": [t]})).unwrap();
+    assert_eq!(doc(&s, t).text, "replaced");
+    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "a preset that replaces source text changes the IME owner");
+}
+
+#[test]
+fn a_failed_property_write_keeps_the_edited_document_and_its_owner() {
+    let (mut s, t) = session("abc");
+    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
+    let owner = s.state.text_edit.as_ref().unwrap().session;
+    let steps = s.history.undo.len();
+
+    // null cannot coerce to a Text value: the edit fails before anything is committed.
+    assert!(s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "value": null})).is_err());
+    assert_eq!(doc(&s, t).text, "abc");
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "a failed write keeps the IME owner");
+    assert_eq!(s.history.undo.len(), steps, "a failed write records no undo step");
+}
+
+#[test]
+fn property_writes_off_the_cti_keep_the_owner_until_they_change_the_cti_document() {
+    let (mut s, t) = session("abc");
+    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
+    s.execute("prop.toggleAnimation", json!({"layer": t, "path": "text/sourceText"})).unwrap();
+    s.execute("prop.addKey", json!({"layer": t, "path": "text/sourceText", "time": 1.0, "value": "later"})).unwrap();
+    let owner = s.state.text_edit.as_ref().unwrap().session;
+
+    // Writing a key at 1s leaves the CTI (0s) value as it was.
+    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "time": 1.0, "value": "changed"})).unwrap();
+    assert_eq!(doc(&s, t).text, "abc");
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "an off-CTI write keeps the IME owner");
+
+    // Writing the CTI value itself replaces the document.
+    s.execute("prop.set", json!({"layer": t, "path": "text/sourceText", "value": "cti"})).unwrap();
+    assert_eq!(doc(&s, t).text, "cti");
+    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "a CTI write changes the IME owner");
+}
+
+#[test]
+fn unrelated_project_cleanup_keeps_the_ime_owner_but_replacement_changes_it() {
+    let (mut s, t) = session("abc");
+    s.execute("text.edit", json!({"layer": t, "caret": 1})).unwrap();
+    let owner = s.state.text_edit.as_ref().unwrap().session;
+
+    // file.removeUnusedFootage calls sanitize_state while the edited document is untouched.
+    s.execute("file.importSolid", json!({"name": "Unused"})).unwrap();
+    let removed = s.execute("file.removeUnusedFootage", json!({})).unwrap();
+    assert_eq!(removed["removed"], json!(1), "the unused solid was actually removed");
+    assert_eq!(s.state.text_edit.as_ref().unwrap().session, owner, "unrelated cleanup keeps the IME owner");
+
+    // Replacing the Source Text is a document replacement: a new owner.
+    s.execute("layer.setText", json!({"layer": t, "text": "replaced"})).unwrap();
+    assert_ne!(s.state.text_edit.as_ref().unwrap().session, owner, "replacing the document changes the owner");
+}
+
+#[test]
 fn ime_session_does_not_cross_a_composition_switch() {
     let (mut s, t) = session("abc");
     s.execute("text.edit", json!({"layer": t})).unwrap();
