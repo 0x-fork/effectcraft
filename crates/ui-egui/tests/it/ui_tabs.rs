@@ -6,7 +6,7 @@ use effectcraft_engine::Session;
 use effectcraft_engine::project::ItemId;
 use effectcraft_ui_egui::EffectcraftApp;
 use effectcraft_ui_egui::dock::WorkspaceExt as _;
-use effectcraft_ui_egui::dock::{Node, PanelKind, Workspace};
+use effectcraft_ui_egui::dock::{Node, PanelKind, SplitSize, Workspace};
 use egui::{Event, Pos2, pos2};
 use egui_kittest::Harness;
 use serde_json::json;
@@ -204,44 +204,81 @@ fn panels_dock_beside_others_and_gutters_resize_them() {
     assert!((wider.width() - project.width() - 60.0).abs() < 2.0, "{} → {}", project.width(), wider.width());
 }
 
-/// Issue #171: the gaps between the right column's stacked panels drag to resize them (Preview
-/// was stuck at its default height), not below a minimum; the heights stay in the layout.
+/// The divider below the Preview frame: the horizontal gutter between it and the Properties
+/// frame.
+fn preview_divider(h: &Harness<'_, EffectcraftApp>) -> egui::Rect {
+    let (preview, props) = (rect(h, "panel.Preview"), rect(h, "panel.Properties"));
+    h.state()
+        .auto
+        .previous
+        .iter()
+        .filter(|e| e.id.starts_with("dock.gutter.") && e.rect[2] > e.rect[3])
+        .map(|e| egui::Rect::from_min_size(pos2(e.rect[0], e.rect[1]), egui::vec2(e.rect[2], e.rect[3])))
+        .find(|g| g.x_range().contains(preview.center().x) && g.center().y >= preview.max.y - 1.0 && g.center().y <= props.min.y + 1.0)
+        .expect("a gutter between Preview and Properties")
+}
+
+/// Default's right column: a short Preview frame (46 points of body) and the Properties frame
+/// below it taking the rest of the column, at any window height.
 #[test]
-fn stacked_panel_gaps_resize_the_panels() {
+fn the_default_preview_frame_is_short_and_properties_takes_the_rest() {
     let (mut h, _, _) = harness();
-    fn height(w: &Workspace, p: PanelKind) -> Option<Option<f32>> {
-        fn rec(n: &Node<PanelKind>, p: PanelKind) -> Option<Option<f32>> {
+    let body = |h: &Harness<'_, EffectcraftApp>| rect(h, "panel.Preview").height();
+    assert!((body(&h) - 46.0).abs() < 1.5, "Preview {}", body(&h));
+    let props = rect(&h, "panel.Properties");
+    assert!(props.height() > 300.0, "Properties {props:?}");
+    // A taller window gives the room to Properties.
+    let size = h.ctx.content_rect().size();
+    h.set_size(size + egui::vec2(0.0, 200.0));
+    h.run_steps(3);
+    assert!((body(&h) - 46.0).abs() < 1.5, "Preview {}", body(&h));
+    assert!((rect(&h, "panel.Properties").height() - props.height() - 200.0).abs() < 2.0);
+}
+
+/// Issue #171: the divider below the Preview frame drags to resize it (Preview was stuck at its
+/// default height), not below a minimum; the new height stays in the layout.
+#[test]
+fn the_preview_frame_divider_resizes_it() {
+    let (mut h, _, _) = harness();
+    fn preview_size(w: &Workspace) -> Option<SplitSize> {
+        fn rec(n: &Node<PanelKind>) -> Option<SplitSize> {
             match n {
-                Node::Split { first, second, .. } => rec(first, p).or_else(|| rec(second, p)),
-                Node::Stack { entries } => entries.iter().find(|e| e.panel == p).map(|e| e.height),
+                Node::Split { first, second, size, .. } => match first.as_ref() {
+                    Node::Tabs { panels, .. } if panels.contains(&PanelKind::Preview) => Some(*size),
+                    _ => rec(first).or_else(|| rec(second)),
+                },
                 _ => None,
             }
         }
-        rec(w.layout.root.as_ref()?, p)
+        rec(w.layout.root.as_ref()?)
     }
     let (preview, props) = (rect(&h, "panel.Preview"), rect(&h, "panel.Properties"));
-    let gap = rect(&h, "dock.gutter.bs0");
-    assert!(gap.center().y >= preview.max.y - 1.0 && gap.center().y <= props.min.y + 1.0, "the gap below Preview: {gap:?}");
+    let gap = preview_divider(&h);
     drag(&mut h, gap.center(), gap.center() + egui::vec2(0.0, 150.0));
     let (p2, q2) = (rect(&h, "panel.Preview"), rect(&h, "panel.Properties"));
     assert!((p2.height() - preview.height() - 150.0).abs() < 2.0, "Preview {} → {}", preview.height(), p2.height());
     assert!((props.height() - q2.height() - 150.0).abs() < 2.0, "Properties {} → {}", props.height(), q2.height());
     assert!((q2.max.y - props.max.y).abs() < 1.0, "the column stays filled");
-    // The saved heights share the column as the panels do.
-    let saved = |p| height(&h.state().ui.dock, p).flatten().expect("the height is in the layout");
-    let (sp, sq) = (saved(PanelKind::Preview), saved(PanelKind::Properties));
-    assert!((sp / sq - p2.height() / q2.height()).abs() < 0.02, "{sp}/{sq} vs {}/{}", p2.height(), q2.height());
-    // Collapsing and expanding Preview keeps its height.
-    let toggle = rect(&h, "panel.header.Preview");
-    click_n(&mut h, toggle.center(), 1);
-    assert!(!h.state().ui.dock.is_visible(PanelKind::Preview));
-    click_n(&mut h, toggle.center(), 1);
-    assert!((rect(&h, "panel.Preview").height() - p2.height()).abs() < 1.0);
+    // The frame keeps a fixed height, 150 points more.
+    let Some(SplitSize::FixedFirst(size)) = preview_size(&h.state().ui.dock) else { panic!("{:?}", preview_size(&h.state().ui.dock)) };
+    assert!((size - effectcraft_ui_egui::dock::PREVIEW_FRAME - 150.0).abs() < 2.0, "{size}");
     // Dragged up to Preview's top, it stops at its minimum.
-    let gap = rect(&h, "dock.gutter.bs0");
+    let gap = preview_divider(&h);
     let top = rect(&h, "panel.Preview").min.y;
     drag(&mut h, gap.center(), pos2(gap.center().x, top));
     assert!((rect(&h, "panel.Preview").height() - 40.0).abs() < 1.0, "{}", rect(&h, "panel.Preview").height());
+}
+
+/// Maximize acts on one frame: the Preview frame fills the dock area, Properties hides.
+#[test]
+fn maximizing_preview_maximizes_its_frame_alone() {
+    let (mut h, _, _) = harness();
+    let preview = rect(&h, "panel.Preview");
+    h.state_mut().ui.maximized = Some(PanelKind::Preview);
+    h.run_steps(3);
+    let big = rect(&h, "panel.Preview");
+    assert!(big.height() > preview.height() + 300.0 && big.width() > preview.width() + 300.0, "{preview:?} → {big:?}");
+    assert!(h.state().auto.find("panel.Properties").is_none(), "the Properties frame is not shown");
 }
 
 /// Issue #45: the Project panel's details (name, size, duration) stay inside the panel with a
@@ -340,6 +377,10 @@ fn dragging_the_viewer_timeline_divider_far_up_does_not_crash() {
 #[test]
 fn a_stacked_panels_whole_header_bar_toggles_it() {
     let (mut h, _, _) = harness();
+    use effectcraft_ui_egui::dock;
+    let stack = dock::stack(&[(PanelKind::Preview, true, Some(46.0)), (PanelKind::Properties, true, None)]);
+    h.state_mut().ui.dock = dock::docked(dock::hsplit(SplitSize::FixedSecond(300.0), dock::tabs(&[PanelKind::Composition], 0), stack));
+    h.run_steps(3);
     let open = |h: &Harness<'_, EffectcraftApp>| h.state().ui.dock.is_visible(PanelKind::Preview);
     assert!(open(&h));
     let toggle = rect(&h, "panel.header.Preview");
@@ -357,30 +398,23 @@ fn a_stacked_panels_whole_header_bar_toggles_it() {
     assert!(open(&h), "a click on the bar away from the button opens it");
 }
 
-/// #302: a panel dropped onto a stacked panel joins the stack as a stacked panel of its own
-/// below it (each stacked entry holds one panel), and opens and closes on its own.
+/// #302: a panel dropped onto the Properties frame becomes a tab in that frame; its tabs switch
+/// the frame's panel, and the Preview frame above keeps showing.
 #[test]
-fn a_tab_dropped_on_a_stacked_panel_joins_its_frame() {
+fn a_tab_dropped_on_a_frame_joins_it() {
     let (mut h, _, _) = harness();
     let dock = |h: &Harness<'_, EffectcraftApp>| h.state().ui.dock.clone();
-    let stacked = |h: &Harness<'_, EffectcraftApp>| match &h.state().ui.dock.layout.root {
-        Some(Node::Split { second, .. }) => match second.as_ref() {
-            Node::Stack { entries } => entries.iter().map(|e| e.panel).collect::<Vec<_>>(),
-            other => panic!("{other:?}"),
-        },
-        other => panic!("{other:?}"),
-    };
     let fx = rect(&h, "panel.tab.EffectControls");
     let props = rect(&h, "panel.Properties");
     drag(&mut h, fx.center(), props.center());
-    let order = stacked(&h);
-    let at = order.iter().position(|p| *p == PanelKind::Properties).unwrap();
-    assert_eq!(order.get(at + 1), Some(&PanelKind::EffectControls), "{order:?}");
-    assert!(dock(&h).is_visible(PanelKind::EffectControls) && dock(&h).is_visible(PanelKind::Properties));
-    // Its header button closes it alone.
-    let toggle = rect(&h, "panel.header.EffectControls");
-    click_n(&mut h, toggle.center(), 1);
-    assert!(!dock(&h).is_visible(PanelKind::EffectControls) && dock(&h).is_visible(PanelKind::Properties));
+    let group = group_of(&dock(&h), PanelKind::Properties).unwrap();
+    assert!(group.starts_with(&[PanelKind::Properties]) && group.contains(&PanelKind::EffectControls), "{group:?}");
+    assert!(dock(&h).is_visible(PanelKind::EffectControls) && !dock(&h).is_visible(PanelKind::Properties));
+    assert!(dock(&h).is_visible(PanelKind::Preview));
+    // The frame's other tab shows Properties again, the frame stays open.
+    let tab = rect(&h, "panel.tab.Properties");
+    click_n(&mut h, tab.center(), 1);
+    assert!(dock(&h).is_visible(PanelKind::Properties) && !dock(&h).is_visible(PanelKind::EffectControls));
     // The layout (saved workspaces) round-trips.
     let s = serde_json::to_string(&dock(&h)).unwrap();
     assert_eq!(serde_json::from_str::<Workspace>(&s).unwrap(), dock(&h));

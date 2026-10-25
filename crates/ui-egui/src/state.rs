@@ -577,6 +577,11 @@ pub struct UiState {
     /// The panel maximized to fill the dock area (`~`), if any.
     #[serde(default)]
     pub maximized: Option<PanelKind>,
+    /// Floating windows of [`Self::dock`] whose native rect holds the OS window's outer
+    /// position, from a workspace file of an earlier version (see
+    /// [`crate::dock_ui::native_outer_to_content`]). Workspaces are not saved while any remain.
+    #[serde(skip)]
+    pub native_outer: Vec<u64>,
     /// Locked Composition / Timeline tabs (panel ids): opening another composition does not
     /// bring a locked panel forward (the tab's lock icon, as After Effects' viewer lock).
     #[serde(default)]
@@ -694,6 +699,7 @@ impl Default for UiState {
             workspace: "Default".into(),
             dock: crate::dock::Workspace::new(crate::dock::workspace("Default")),
             saved_workspaces: Default::default(),
+            native_outer: Vec::new(),
             maximized: None,
             locked_tabs: BTreeSet::new(),
             viewers: Default::default(),

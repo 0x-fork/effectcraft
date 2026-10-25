@@ -239,8 +239,10 @@ Saved workspaces (`workspaces.json`, version 2) hold craft-ui `Workspace`s: the 
 closed panels with where each goes back, the lock, and each floating window's desktop place. A
 version 1 file (EffectCraft 0.10 and earlier) and the older unversioned record of
 named workspaces load with every panel in place: the current layout, the named workspaces,
-floating windows and their native window places. A stacked frame with several tabs becomes one
-stacked panel per tab, the shown one keeping the frame's open state and height. Panels that were
-closed stay closed and reopen at their default place. The first save writes version 2 and keeps
+floating windows and their native window places. A column of stacked frames becomes tab groups
+split top to bottom: each open frame keeps all its tabs and its height (as a fixed size), and a
+closed frame's tabs join the open frame above it. A native window's place moves from the OS
+window's outer position to its content's, by the main window's title bar, before the first save.
+Panels that were closed stay closed and reopen at their default place. The first save writes version 2 and keeps
 the earlier file as `workspaces.old.json`. A damaged, unknown or newer file loads as the default
 layout and is left unchanged.

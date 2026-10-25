@@ -5,15 +5,19 @@
 //!   arrangement, the named workspaces, focus and the maximized panel.
 //! - The unversioned record (`{workspaces, floating}`) holds only named workspaces; the
 //!   current arrangement stays the default.
-//! - A stacked frame with several tabs becomes one stacked panel per tab; the shown tab keeps
-//!   the frame's open state and height, the others are collapsed.
+//! - A column of stacked frames becomes tab groups split top to bottom. Each open frame is a
+//!   group with all its tabs; a frame with a height keeps it as a fixed size (its tab strip
+//!   added), and the others share the rest. A closed frame's tabs join the open frame above it
+//!   (below it, at the top of the column), as a split has no collapsed frames.
 //! - A floating group in its own native window (`panel_windows`) keeps that place as the
-//!   window's native rect.
+//!   window's native rect. The earlier version stored the OS window's outer position, so the
+//!   window's id is returned for [`crate::dock_ui::native_outer_to_content`] to move it to its
+//!   content position once the main window reports its frame.
 //! - Closed panels had no recorded place: they stay closed and reopen at their default place.
 
 use std::collections::BTreeMap;
 
-use craft_ui::docking::{Floating, Node, StackEntry};
+use craft_ui::docking::{Floating, Node};
 use craft_ui::layout::{SplitAxis, SplitSize};
 use serde::Deserialize;
 
@@ -92,24 +96,28 @@ pub(super) fn is_legacy(value: &serde_json::Value) -> bool {
     }
 }
 
-/// The snapshot an earlier version's file describes. `ui` supplies what an unversioned record
+/// The snapshot an earlier version's file describes, and the ids of its floating windows whose
+/// native rect holds the OS window's outer position. `ui` supplies what an unversioned record
 /// leaves out (the current arrangement). The caller validates the result.
-pub(super) fn migrate(value: serde_json::Value, ui: &UiState) -> Result<Snapshot, String> {
+pub(super) fn migrate(value: serde_json::Value, ui: &UiState) -> Result<(Snapshot, Vec<u64>), String> {
     if value.get("version").is_none() {
         let record: OldRecord = serde_json::from_value(value).map_err(|e| e.to_string())?;
         let mut snapshot = Snapshot::capture(ui);
         snapshot.saved_workspaces = named(record.workspaces, record.floating)?;
-        return Ok(snapshot);
+        return Ok((snapshot, Vec::new()));
     }
     let old: OldSnapshot = serde_json::from_value(value).map_err(|e| e.to_string())?;
-    Ok(Snapshot {
+    let dock = workspace(old.dock, old.floating, &old.panel_windows)?;
+    let outer = dock.layout.floating.iter().filter(|window| window.native.is_some()).map(|window| window.id).collect();
+    let snapshot = Snapshot {
         version: VERSION,
         workspace: old.workspace,
-        dock: workspace(old.dock, old.floating, &old.panel_windows)?,
+        dock,
         focused: old.focused,
         maximized: old.maximized,
         saved_workspaces: named(old.saved_workspaces, old.saved_floating)?,
-    })
+    };
+    Ok((snapshot, outer))
 }
 
 /// Named workspaces with their floating groups; floating groups of no named workspace are
@@ -158,22 +166,80 @@ fn node(old: OldNode, depth: usize) -> Result<Node<PanelKind>, String> {
             first: Box::new(node(*a, depth.saturating_add(1))?),
             second: Box::new(node(*b, depth.saturating_add(1))?),
         },
-        OldNode::Stack { entries } => {
-            let mut out = Vec::new();
-            for entry in entries {
-                let mut panels = entry.panels;
-                if let Some(panel) = entry.panel
-                    && !panels.contains(&panel)
-                {
-                    panels.insert(0, panel);
-                }
-                let shown = panels.get(entry.active).or(panels.first()).copied();
-                for panel in panels {
-                    let front = Some(panel) == shown;
-                    out.push(StackEntry { panel, open: front && entry.open, height: entry.height.filter(|_| front) });
-                }
-            }
-            Node::Stack { entries: out }
-        }
+        OldNode::Stack { entries } => column(entries)?,
     })
+}
+
+/// The space between two frames of a column, in points ([`crate::theme::Tokens::gap`]).
+const FRAME_GAP: f32 = 4.0;
+/// The largest frame height a migrated column keeps, in points.
+const MAX_FRAME: f32 = 10_000.0;
+
+/// A tab group of a column: its panels, shown tab, and body height when it has one.
+struct Frame {
+    panels: Vec<PanelKind>,
+    active: usize,
+    height: Option<f32>,
+}
+
+/// A column of stacked frames as tab groups split top to bottom (see the module docs).
+fn column(entries: Vec<OldStackEntry>) -> Result<Node<PanelKind>, String> {
+    let mut frames: Vec<Frame> = Vec::new();
+    // Tabs of closed frames above the first open one.
+    let mut waiting: Vec<PanelKind> = Vec::new();
+    for entry in entries {
+        let mut panels = entry.panels;
+        if let Some(panel) = entry.panel
+            && !panels.contains(&panel)
+        {
+            panels.insert(0, panel);
+        }
+        if panels.is_empty() {
+            continue;
+        }
+        let active = entry.active.min(panels.len().saturating_sub(1));
+        if entry.open {
+            let height = entry.height.filter(|h| h.is_finite() && *h > 0.0).map(|h| h.min(MAX_FRAME));
+            frames.push(Frame { panels, active, height });
+        } else if let Some(above) = frames.last_mut() {
+            above.panels.extend(panels);
+        } else {
+            waiting.extend(panels);
+        }
+    }
+    match frames.first_mut() {
+        Some(top) => top.panels.extend(waiting),
+        None if !waiting.is_empty() => frames.push(Frame { panels: waiting, active: 0, height: None }),
+        None => return Err("a stacked frame holds no panels".into()),
+    }
+    let frame_size = |frame: &Frame| frame.height.map(|h| h + crate::dock::TAB_STRIP);
+    let mut node: Option<Node<PanelKind>> = None;
+    // Below the frame being added: the frames' fixed sizes and gaps, or None when one shares.
+    let mut below_fixed = Some(0.0_f32);
+    let mut below_flexible = 0_usize;
+    for frame in frames.into_iter().rev() {
+        let own = frame_size(&frame);
+        let gap = if node.is_some() { FRAME_GAP } else { 0.0 };
+        let tabs = Node::Tabs { panels: frame.panels, active: frame.active };
+        node = Some(match node {
+            None => tabs,
+            Some(rest) => {
+                let size = match (own, below_fixed) {
+                    (Some(own), _) => SplitSize::FixedFirst(own),
+                    (None, Some(below)) => SplitSize::FixedSecond(below),
+                    // Shares the rest with the flexible frames below.
+                    (None, None) => SplitSize::Ratio(1.0 / (below_flexible as f32 + 1.0)),
+                };
+                Node::Split { axis: SplitAxis::Vertical, size, first: Box::new(tabs), second: Box::new(rest) }
+            }
+        });
+        below_fixed = match (own, below_fixed) {
+            (Some(own), Some(below)) => Some(below + gap + own),
+            _ => None,
+        };
+        if own.is_none() {
+            below_flexible = below_flexible.saturating_add(1);
+        }
+    }
+    node.ok_or_else(|| "a stacked frame holds no panels".into())
 }

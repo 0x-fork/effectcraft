@@ -238,6 +238,12 @@ fn workspace_floating(name: &str) -> Vec<Floating<PanelKind>> {
     }
 }
 
+/// The height of a frame's tab strip ([`Tokens::tab_h`]).
+pub const TAB_STRIP: f32 = 30.0;
+/// The height of Default's Preview frame: its tab strip over a 46-point body that fits the
+/// playback controls.
+pub const PREVIEW_FRAME: f32 = TAB_STRIP + 46.0;
+
 /// The built-in layout of a named workspace (an unknown name gets Default's).
 pub fn workspace(name: &str) -> Layout {
     Layout { root: Some(workspace_root(name)), floating: workspace_floating(name) }
@@ -318,7 +324,7 @@ fn workspace_root(name: &str) -> Node<PanelKind> {
                 ),
                 tabs(&[Timeline], 0),
             ),
-            stack(&[(Properties, true, None), (EffectsPresets, false, None)]),
+            tabs(&[Properties, EffectsPresets], 0),
         ),
         // Color: wide Effect Controls for grading effects, Info for colour readouts.
         "Color" => vsplit(
@@ -381,7 +387,7 @@ fn workspace_root(name: &str) -> Node<PanelKind> {
             tabs(&[Timeline, RenderQueue], 0),
         ),
         // Default (as in After Effects): Project/Effect Controls | Composition over the Timeline,
-        // and a full-height right column with Preview above the Properties panel.
+        // and a full-height right column: a short Preview frame above the Properties frame.
         _ => hsplit(
             FixedSecond(300.0),
             vsplit(
@@ -389,7 +395,7 @@ fn workspace_root(name: &str) -> Node<PanelKind> {
                 hsplit(FixedFirst(300.0), tabs(&[Project, EffectControls], 0), tabs(&[Composition, Layer], 0)),
                 tabs(&[Timeline, RenderQueue], 0),
             ),
-            stack(&[(Preview, true, Some(46.0)), (Properties, true, None), (Align, false, None), (Audio, false, None), (EffectsPresets, false, None)]),
+            vsplit(FixedFirst(PREVIEW_FRAME), tabs(&[Preview], 0), tabs(&[Properties, Align, Audio, EffectsPresets], 0)),
         ),
     }
 }
@@ -634,25 +640,35 @@ mod tests {
         for p in PanelKind::ALL.iter().filter(|p| !matches!(p, ScriptConsole | EssentialGraphics | MaskInterpolation)) {
             assert!(all.is_open(*p), "All Panels lacks {p:?}");
         }
-        // Default: After Effects' right column of stacked panels, Preview open at its own height.
-        let default = workspace("Default");
-        let Some(Node::Split { second, size: SplitSize::FixedSecond(300.0), .. }) = &default.root else { panic!("{default:?}") };
-        let Node::Stack { entries } = second.as_ref() else { panic!("{second:?}") };
-        assert_eq!(entries[0], StackEntry { panel: Preview, open: true, height: Some(46.0) });
-        assert_eq!(stack_gutter_id(&default, Preview).as_deref(), Some("dock.gutter.bs0"));
-        assert_eq!(stack_gutter_id(&default, Align).as_deref(), Some("dock.gutter.bs2"));
+        // No built-in workspace uses accordions: right columns are frames split vertically.
+        fn no_stack(node: &Node<PanelKind>) -> bool {
+            match node {
+                Node::Split { first, second, .. } => no_stack(first) && no_stack(second),
+                Node::Stack { .. } => false,
+                _ => true,
+            }
+        }
+        for name in WORKSPACES {
+            let layout = workspace(name);
+            assert!(layout.root.iter().chain(layout.floating.iter().map(|f| &f.root)).all(no_stack), "{name}");
+        }
     }
 
     #[test]
-    fn stacked_panels_open_close_and_join_as_groups() {
-        let mut w = Workspace::new(workspace("Default"));
-        assert!(!w.is_visible(Align));
-        apply(&mut w, Action::SetStackOpen { panel: Align, open: true });
-        assert!(w.is_visible(Align) && w.is_visible(Properties));
-        apply(&mut w, Action::SetStackOpen { panel: Align, open: false });
-        assert!(!w.is_visible(Align) && w.is_open(Align));
-        // A stacked panel is a group of its own.
-        assert_eq!(w.group_of(Audio), vec![Audio]);
+    fn default_right_column_is_a_short_preview_frame_over_the_properties_frame() {
+        let default = workspace("Default");
+        let Some(Node::Split { second, size: SplitSize::FixedSecond(300.0), .. }) = &default.root else { panic!("{default:?}") };
+        let Node::Split { axis: SplitAxis::Vertical, size: SplitSize::FixedFirst(PREVIEW_FRAME), first, second } = second.as_ref() else {
+            panic!("{second:?}")
+        };
+        assert_eq!(**first, tabs(&[Preview], 0));
+        assert_eq!(**second, tabs(&[Properties, Align, Audio, EffectsPresets], 0));
+        let mut w = Workspace::new(default);
+        assert!(w.is_visible(Preview) && w.is_visible(Properties) && !w.is_visible(Align));
+        // The Properties frame takes tabs; the Preview frame stays a frame of its own.
+        apply(&mut w, Action::Move { panel: Project, anchor: Properties, placement: Placement::Tab { before: None } });
+        assert_eq!(w.group_of(Project), vec![Properties, Align, Audio, EffectsPresets, Project]);
+        assert_eq!(w.group_of(Preview), vec![Preview]);
     }
 
     #[test]

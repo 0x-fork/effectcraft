@@ -107,12 +107,14 @@ pub(crate) struct WorkspaceStore {
 impl WorkspaceStore {
     pub(crate) fn load(config: Option<&dyn ConfigStore>, ui: &mut UiState) -> Self {
         let mut original = None;
+        let mut outer = Vec::new();
         let loaded = config.map_or(Ok(None), |c| c.read_bounded(FILE, MAX_BYTES)).map_err(|e| e.to_string()).and_then(|text| {
             text.map(|text| {
                 let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
                 let snapshot = if legacy::is_legacy(&value) {
-                    let snapshot = legacy::migrate(value, ui)?;
+                    let (snapshot, windows) = legacy::migrate(value, ui)?;
                     original = Some(text);
+                    outer = windows;
                     snapshot
                 } else if value.get("version").is_none() {
                     return Err("not a workspace file".to_string());
@@ -127,6 +129,7 @@ impl WorkspaceStore {
         let error = match loaded {
             Ok(Some(snapshot)) => {
                 snapshot.apply(ui);
+                ui.native_outer = outer;
                 None
             }
             Ok(None) => None,
@@ -164,7 +167,8 @@ impl WorkspaceStore {
 
     pub(crate) fn save(&mut self, config: Option<&dyn ConfigStore>, ui: &UiState) -> Result<bool, String> {
         let Some(config) = config else { return Ok(false) };
-        if !self.has_changes(ui) {
+        // A window still at its outer position would be saved as if that were its content's.
+        if !self.has_changes(ui) || !ui.native_outer.is_empty() {
             return Ok(false);
         }
         let snapshot = Snapshot::capture(ui);
@@ -282,7 +286,7 @@ mod tests {
                 crate::dock::hsplit(SplitSize::FixedFirst(300.0), crate::dock::tabs(&[Project, EffectControls, EffectsPresets], 2), tabs(&[Composition])),
                 crate::dock::hsplit(SplitSize::Ratio(0.5), tabs(&[Timeline]), tabs(&[Audio])),
             ),
-            crate::dock::stack(&[(Properties, true, None)]),
+            tabs(&[Properties]),
         );
         assert_eq!(ui.dock.layout.root, Some(root));
         let floating: Vec<_> = ui.dock.layout.floating.iter().map(|w| (w.panels().copied().collect::<Vec<_>>(), w.rect, w.native)).collect();
@@ -297,6 +301,17 @@ mod tests {
         for panel in [Align, Layer] {
             assert!(!ui.dock.is_open(panel), "{panel:?}");
         }
+        // The native window's place is its outer position until the main window reports its
+        // frame (here a 28-point title bar); the file is not rewritten before.
+        let id = ui.dock.layout.floating[1].id;
+        assert_eq!(ui.native_outer, [id]);
+        let mut store = store;
+        assert!(!store.save(Some(&config), &ui).unwrap());
+        let outer = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(1600.0, 1000.0));
+        crate::dock_ui::native_outer_to_content(&mut ui, Some(outer), Some(outer.translate(egui::vec2(0.0, 28.0))), 0.1);
+        assert_eq!(ui.dock.layout.floating[1].native, Some([200.0, 528.0, 520.0, 240.0]));
+        assert!(ui.native_outer.is_empty());
+        assert!(store.save(Some(&config), &ui).unwrap());
         // The named workspace still has Layer, closed only after it was saved.
         let saved = ui.saved_workspaces.get("My Layout").unwrap();
         assert!(saved.is_docked(Layer) && saved.is_floating(Preview) && !saved.is_open(Align));
@@ -309,6 +324,13 @@ mod tests {
         config.write(FILE, V1).unwrap();
         let mut ui = UiState::default();
         let mut store = WorkspaceStore::load(Some(&config), &mut ui);
+        // A backend that reports no window positions: the native place stays as it was.
+        let native = ui.dock.layout.floating[1].native;
+        crate::dock_ui::native_outer_to_content(&mut ui, None, None, 1.0);
+        assert!(!ui.native_outer.is_empty(), "waits for a report");
+        crate::dock_ui::native_outer_to_content(&mut ui, None, None, 5.0);
+        assert!(ui.native_outer.is_empty());
+        assert_eq!(ui.dock.layout.floating[1].native, native);
         let migrated = Snapshot::capture(&ui);
         assert!(store.has_changes(&ui), "the migrated layout is written without waiting for an edit");
         assert!(store.save(Some(&config), &ui).unwrap());
@@ -328,7 +350,8 @@ mod tests {
         let text = r#"{"version":1,"workspace":"Mine","dock":{"Tabs":{"panels":[],"active":0}},
             "floating":[{"panels":["Project"],"active":0,"rect":[10.0,10.0,300.0,200.0]}],
             "focused":"Project","maximized":null,
-            "saved_workspaces":{"Mine":{"Stack":{"entries":[{"panel":"Info","open":true},{"panels":["Audio","Preview"],"active":1,"open":true,"height":80.0}]}}},
+            "saved_workspaces":{"Mine":{"Stack":{"entries":[{"panel":"Info","open":true},{"panels":["Audio","Preview"],"active":1,"open":true,"height":80.0}]}},
+                "Column":{"Stack":{"entries":[{"panel":"Align","open":false},{"panel":"Preview","open":true,"height":46.0},{"panels":["Properties","Paint"],"active":1,"open":false,"height":300.0},{"panel":"Info","open":true}]}}},
             "saved_floating":{"Gone":[{"panels":["Align"],"active":0,"rect":[0.0,0.0,100.0,100.0]}]}}"#;
         let config = MemoryConfig::default();
         config.write(FILE, text).unwrap();
@@ -337,9 +360,15 @@ mod tests {
         assert_eq!(store.error, None);
         assert_eq!(ui.dock.layout.root, None);
         assert!(ui.dock.is_floating(PanelKind::Project));
-        let stack = crate::dock::stack(&[(PanelKind::Info, true, None), (PanelKind::Audio, false, None), (PanelKind::Preview, true, Some(80.0))]);
-        assert_eq!(ui.saved_workspaces.get("Mine").and_then(|w| w.layout.root.clone()), Some(stack));
-        assert_eq!(ui.saved_workspaces.len(), 1, "floating groups of no named workspace are dropped");
+        use PanelKind::*;
+        // Each open frame is a tab group with all its tabs; a frame's height is a fixed size
+        // (with its tab strip), and the frame without one takes the rest.
+        let column = crate::dock::vsplit(SplitSize::FixedSecond(80.0 + crate::dock::TAB_STRIP), tabs(&[Info]), crate::dock::tabs(&[Audio, Preview], 1));
+        assert_eq!(ui.saved_workspaces.get("Mine").and_then(|w| w.layout.root.clone()), Some(column));
+        // Closed frames' tabs join the open frame above them, or below at the top.
+        let column = crate::dock::vsplit(SplitSize::FixedFirst(46.0 + crate::dock::TAB_STRIP), tabs(&[Preview, Properties, Paint, Align]), tabs(&[Info]));
+        assert_eq!(ui.saved_workspaces.get("Column").and_then(|w| w.layout.root.clone()), Some(column));
+        assert_eq!(ui.saved_workspaces.len(), 2, "floating groups of no named workspace are dropped");
     }
 
     #[test]

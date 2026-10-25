@@ -182,9 +182,8 @@ fn panels_taller_than_their_space_have_a_scroll_bar_to_drag() {
         for _ in 0..6 {
             app.session.execute("renderQueue.add", json!({})).unwrap();
         }
-        // The panel alone in the window (maximizing a stacked panel maximizes its whole stack).
-        app.ui.dock = effectcraft_ui_egui::dock::docked(effectcraft_ui_egui::dock::tabs(&[panel], 0));
         app.show_panel(panel);
+        app.ui.maximized = Some(panel);
         h.run_steps(3);
         let (_, max) = scrolled(&h, id);
         assert!(max > 0.0, "{id}: the rows overflow");

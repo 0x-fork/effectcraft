@@ -6,6 +6,7 @@
 //! through its command path (`window.dockAction`), so pointer, menu and control-channel changes
 //! share one route.
 
+use crate::state::UiState;
 use craft_ui::docking::{Action, Divider, DockArea, DockCommand, DockContent, DockError, DockEvent, DockStyle, FloatSpace, Hit, ResizeEdge, UiDock};
 use egui::{Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use serde_json::{Value, json};
@@ -43,6 +44,29 @@ pub fn sanitized_window_rect(rect: [f32; 4]) -> [f32; 4] {
         finite(w, 420.0).clamp(PANEL_WINDOW_MIN[0], PANEL_WINDOW_MAX),
         finite(h, 320.0).clamp(PANEL_WINDOW_MIN[1], PANEL_WINDOW_MAX),
     ]
+}
+
+/// How long to wait for the main window to report its frame before migrated native windows
+/// keep their places as they are, in seconds.
+const FRAME_REPORT_WAIT: f64 = 2.0;
+
+/// Moves the native rects of [`UiState::native_outer`]'s windows from the OS window's outer
+/// position to its content position, by the main window's frame offset (`inner` less `outer`,
+/// the main window's desktop rects): the earlier version's windows had the same OS title bar.
+/// Without a report by [`FRAME_REPORT_WAIT`] (a backend without window positions), the places
+/// stay as they are.
+pub(crate) fn native_outer_to_content(ui: &mut UiState, outer: Option<Rect>, inner: Option<Rect>, now: f64) {
+    let offset = match (outer, inner) {
+        (Some(outer), Some(inner)) if outer.min.is_finite() && inner.min.is_finite() => inner.min - outer.min,
+        _ if now < FRAME_REPORT_WAIT => return,
+        _ => egui::Vec2::ZERO,
+    };
+    let ids = std::mem::take(&mut ui.native_outer);
+    for window in ui.dock.layout.floating.iter_mut().filter(|w| ids.contains(&w.id)) {
+        if let Some([x, y, w, h]) = window.native {
+            window.native = Some(sanitized_window_rect([x + offset.x, y + offset.y, w, h]));
+        }
+    }
 }
 
 /// A new floating group's default rect near the centre of `screen`.
@@ -381,6 +405,10 @@ impl EffectcraftApp {
     pub(crate) fn dock_area(&mut self, ui: &mut egui::Ui, body: Rect) {
         let t = self.tokens;
         let ctx = ui.ctx().clone();
+        if !self.ui.native_outer.is_empty() {
+            let (outer, inner, now) = ctx.input_for(egui::ViewportId::ROOT, |i| (i.viewport().outer_rect, i.viewport().inner_rect, i.time));
+            native_outer_to_content(&mut self.ui, outer, inner, now);
+        }
         if self.ui.start_screen {
             // Home covers the whole workspace, as in After Effects (the panels wait behind it).
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).id_salt("home"));
