@@ -5,7 +5,8 @@
 use effectcraft_engine::Session;
 use effectcraft_engine::project::ItemId;
 use effectcraft_ui_egui::EffectcraftApp;
-use effectcraft_ui_egui::dock::{DockNode, PanelKind};
+use effectcraft_ui_egui::dock::WorkspaceExt as _;
+use effectcraft_ui_egui::dock::{Node, PanelKind, Workspace};
 use egui::{Event, Pos2, pos2};
 use egui_kittest::Harness;
 use serde_json::json;
@@ -59,15 +60,6 @@ fn drag(h: &mut Harness<'_, EffectcraftApp>, from: Pos2, to: Pos2) {
     h.run_steps(2);
 }
 
-/// The tabs of the docked group holding `p`, in order.
-fn group_of(n: &DockNode, p: PanelKind) -> Option<Vec<PanelKind>> {
-    match n {
-        DockNode::Split { a, b, .. } => group_of(a, p).or_else(|| group_of(b, p)),
-        DockNode::Tabs { panels, .. } => panels.contains(&p).then(|| panels.clone()),
-        DockNode::Stack { entries } => entries.iter().find(|e| e.contains(p)).map(|e| e.panels.clone()),
-    }
-}
-
 fn open_comps(h: &Harness<'_, EffectcraftApp>) -> Vec<u64> {
     h.state().session.state.open_comps.iter().map(|c| c.0).collect()
 }
@@ -94,7 +86,7 @@ fn project_double_click_opens_a_comp_as_its_own_timeline_tab() {
     click_n(&mut h, close.center(), 1);
     assert_eq!(open_comps(&h), vec![pre]);
     assert_eq!(h.state().session.state.active_comp, Some(ItemId(pre)));
-    assert!(h.state().ui.dock.contains(PanelKind::Timeline));
+    assert!(h.state().ui.dock.is_docked(PanelKind::Timeline));
     // Double-clicking an open comp again adds no second tab.
     let name = rect(&h, &format!("project.item.{pre}.name"));
     click_n(&mut h, name.center(), 2);
@@ -217,12 +209,15 @@ fn panels_dock_beside_others_and_gutters_resize_them() {
 #[test]
 fn stacked_panel_gaps_resize_the_panels() {
     let (mut h, _, _) = harness();
-    fn height(n: &DockNode, p: PanelKind) -> Option<Option<f32>> {
-        match n {
-            DockNode::Split { a, b, .. } => height(a, p).or_else(|| height(b, p)),
-            DockNode::Tabs { .. } => None,
-            DockNode::Stack { entries } => entries.iter().find(|e| e.contains(p)).map(|e| e.height),
+    fn height(w: &Workspace, p: PanelKind) -> Option<Option<f32>> {
+        fn rec(n: &Node<PanelKind>, p: PanelKind) -> Option<Option<f32>> {
+            match n {
+                Node::Split { first, second, .. } => rec(first, p).or_else(|| rec(second, p)),
+                Node::Stack { entries } => entries.iter().find(|e| e.panel == p).map(|e| e.height),
+                _ => None,
+            }
         }
+        rec(w.layout.root.as_ref()?, p)
     }
     let (preview, props) = (rect(&h, "panel.Preview"), rect(&h, "panel.Properties"));
     let gap = rect(&h, "dock.gutter.bs0");
@@ -375,5 +370,10 @@ fn a_tab_dropped_on_a_stacked_panel_joins_its_frame() {
     assert!(dock(&h).is_visible(PanelKind::Properties) && !dock(&h).is_visible(PanelKind::EffectControls));
     // The layout (saved workspaces) round-trips.
     let s = serde_json::to_string(&dock(&h)).unwrap();
-    assert_eq!(serde_json::from_str::<DockNode>(&s).unwrap(), dock(&h));
+    assert_eq!(serde_json::from_str::<Workspace>(&s).unwrap(), dock(&h));
+}
+
+/// The tabs of the group holding `p`, in order.
+fn group_of(w: &Workspace, p: PanelKind) -> Option<Vec<PanelKind>> {
+    Some(w.group_of(p)).filter(|g| !g.is_empty())
 }

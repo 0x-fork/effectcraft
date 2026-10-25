@@ -186,20 +186,48 @@ including outside the layer's `[in, out)` range. Timing metadata carries outside
 `prop.get.time` is comp seconds. For these commands, `path` or `prop` identifies a property, not a group.
 Set a layer's offset with `layer.timing {layer, start}` (comp seconds).
 
-Panel moves, tab ordering, edge splits and floating geometry use shared docking transactions.
-`window.floatPanel` requires exactly four finite numbers when `rect` is supplied. Invalid
-geometry or missing source/anchor panels leaves the layout unchanged. The persisted workspace
-shape is unchanged: accordion open states and explicit heights, floating groups, and dynamic
-viewer/ScriptUI identities remain app data. Pointer drops use the same shared placement rules
-as commands, with floating groups resolved in their actual window stacking order.
+Panels dock in craft-ui's shared docking (`craft_ui::docking`): split frames, tab groups,
+stacked panels and floating windows. Every change, by pointer, menu or command, is one
+transaction that checks the whole result; an invalid one returns an error and leaves the layout
+unchanged. No move or float may leave the docked area empty; closing its last panel is allowed.
+Panels name themselves by id (`"EffectControls"`), by title (`"Effect Controls"`) where a command
+takes a name, or as `{"Viewer":42}` and `{"ScriptPanel":77}` for viewers and ScriptUI panels.
 
-`window.dockAction` accepts `{action}` using the shared docking action's JSON form. It
-covers tab moves and ordering, split and floating geometry, activation, and closing.
-For example, `{"action":{"ResizeSplit":{"path":[],"size":{"FixedFirst":360}}}}`
-resizes the root split; path entries use `false` for the first child and `true` for
-the second. `{"action":{"MoveFloating":{"panel":"Info","rect":[45,65,420,320]}}}`
-repositions and resizes the floating group containing Info. Invalid actions leave the
-layout unchanged. Pointer gestures dispatch through this same catalog command.
-EffectCraft also supports `SetStackOpen` and `ResizeStack`. Dynamic panel identities use
-`{"Viewer":42}` or `{"ScriptPanel":77}` in the action. Closing runs the existing viewer
-and ScriptUI lifecycle callbacks; opening uses the existing panel creation commands.
+- `window.dockAction {action}` applies one craft-ui `Action` in its JSON form. For example,
+  `{"action":{"ResizeSplit":{"path":[],"size":{"FixedFirst":360}}}}` resizes the root split
+  (path entries are `false` for the first child and `true` for the second), and
+  `{"action":{"MoveFloating":{"panel":"Info","rect":[45,65,420,320]}}}` moves and resizes the
+  floating window holding Info. `Open` and `OpenAt` are refused: panels open through the panel
+  commands (`window.panel`, `ui.panel.show`), which run the viewer and ScriptUI lifecycles.
+  Closing runs them too. Pointer gestures dispatch through this command.
+- craft-ui's commands: `window.panel.move`, `.float`, `.dock`, `.activate`, `.close`,
+  `.closeGroup`, `.closeOthers`, `.minimize`, `.iconic`, `.window` and `.layout`, with the params
+  of craft-ui's `DockCommand` (`docs/ui-docking.md` in craft-libs). `window.panel.<Panel>`
+  (`window.panel.Align`) opens and shows that panel. `window.panel.activate` on a closed panel
+  reopens it where it was.
+- `ui.dock {operation, panel, …}` or `ui.dock {action}`: craft-ui's `ui.dock` operations
+  (`open`, `close`, `activate`, `float {rect}`, `moveFloating {rect}`,
+  `move {target, zone?, before?}`, `setStackOpen {open}`, `resizeStack {height}`,
+  `resizeSplit {path, size}`; `rect` is `[x, y, width, height]`). It returns
+  `{"docking": workspace}`. `ui.dock.reset` returns the current workspace to its saved or
+  built-in layout and returns the same.
+- `window.dockPanel {panel, anchor?, zone?, before?}` docks as `window.panel.dock`: `zone` is
+  `center`, `tab`, `left`, `right`, `top`, `bottom`, `above` or `below`; without an anchor a
+  side zone docks along that edge of the whole workspace. `window.floatPanel {panel, rect?}`
+  requires exactly four finite numbers when `rect` is given and otherwise floats a 420x320
+  window in the middle of the app window. `window.closePanel {panel}` closes it.
+- `window.panelWindow {panel, window?}` records a floating panel's window as its own native
+  window (`window` false moves it back; without `window` it toggles). A docked panel floats
+  first. The window is drawn in the main window in this version.
+
+The automation ids of the docking chrome are `panel.tab.<Panel>`, `panel.drag.<Panel>` (a
+group's drag bar), `panel.tabs.more.<Panel>`, `panel.menu.<Panel>` (≡), `panel.header.<Panel>`
+(a stacked panel's open and close button), `panel.tab.<Panel>.lock` (viewer lock),
+`panel.tab.Timeline.<comp>` and `panel.tab.Timeline.close` (the Timeline's comp tabs),
+`panel.float.<n>.move`, `.close`, `.resize` and `.resize.<Edge>` for floating window `n`,
+`dock.gutter.<path>` for dividers (`a`/`b` per split level; a stack's gap below entry `i` adds
+`s<i>`) and `dock.corner.<outer>.<inner>` where two dividers meet.
+
+Saved workspaces (`workspaces.json`, version 2) hold craft-ui `Workspace`s: the layout, the
+closed panels with where each goes back, and the lock. A file from an earlier version loads as
+the default layout and is left unchanged.

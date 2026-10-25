@@ -14,7 +14,6 @@ pub mod color_picker;
 pub mod control;
 pub mod credits;
 pub mod dock;
-mod dock_shared;
 pub mod dock_ui;
 mod expression_diagnostics;
 pub mod frames;
@@ -37,7 +36,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 
 pub use control::ControlRequest;
-use dock::PanelKind;
+use dock::{PanelKind, WorkspaceExt as _};
 use effectcraft_engine::Session;
 use effectcraft_engine::project::ItemId;
 use effectcraft_engine::render::RenderOpts;
@@ -343,6 +342,8 @@ pub struct EffectcraftApp {
     /// Docked groups laid out last frame: (active panel, group rect) — `~` maximizes the one
     /// under the pointer.
     pub(crate) dock_rects: Vec<(PanelKind, egui::Rect)>,
+    /// A floating panel shown by a command: its window comes to the front next frame.
+    pub(crate) pending_panel_raise: Option<PanelKind>,
     /// Home screen: recent-project thumbnail textures by path (None = no thumbnail).
     pub(crate) home_thumbs: std::collections::HashMap<String, Option<egui::TextureHandle>>,
     /// The (project path, saved revision) whose thumbnail was stored last.
@@ -357,14 +358,6 @@ pub struct EffectcraftApp {
 
 /// The saved workspaces in the settings store ([`effectcraft_engine::config::ConfigStore`]).
 pub const WORKSPACES_FILE: &str = "workspaces.json";
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct SavedWorkspaces {
-    #[serde(default)]
-    workspaces: std::collections::BTreeMap<String, dock::DockNode>,
-    #[serde(default)]
-    floating: std::collections::BTreeMap<String, Vec<dock::Floating>>,
-}
 
 impl EffectcraftApp {
     pub fn new(session: Session) -> Self {
@@ -423,6 +416,7 @@ impl EffectcraftApp {
             applied_prefs: None,
             recovery: None,
             dock_rects: vec![],
+            pending_panel_raise: None,
             home_thumbs: Default::default(),
             home_thumb_saved: None,
             window_title: String::new(),
@@ -544,8 +538,7 @@ impl EffectcraftApp {
             self.ui.home_learn = false;
         }
         self.ui.workspace = name.to_string();
-        self.ui.dock = self.ui.saved_workspaces.get(name).cloned().unwrap_or_else(|| dock::workspace(name));
-        self.ui.floating = self.ui.saved_floating.get(name).cloned().unwrap_or_else(|| dock::workspace_floating(name));
+        self.ui.dock = self.ui.saved_workspaces.get(name).cloned().unwrap_or_else(|| dock::Workspace::new(dock::workspace(name)));
         self.ui.maximized = None;
     }
 
@@ -595,46 +588,65 @@ impl EffectcraftApp {
     /// Show panel `p` (opening it in its usual place if it is closed), bring it to the front and
     /// give it the focus: Window ▸ <panel>.
     pub fn show_panel(&mut self, p: PanelKind) {
-        if !self.ui.floating.iter().any(|f| f.panels.contains(&p)) && self.ui.maximized.is_some_and(|m| m != p) {
+        if !self.ui.dock.is_floating(p) && self.ui.maximized.is_some_and(|m| m != p) {
             self.ui.maximized = None;
         }
         self.raise_panel(p);
         self.ui.focused = p;
     }
 
-    /// Bring panel `p` to the front of its group, opening it in its usual place if it is closed,
-    /// without moving the focus (a comp opening brings up its viewer, an effect applied brings up
-    /// Effect Controls).
+    /// Bring panel `p` to the front of its group, opening it if it is closed, without moving the
+    /// focus (a comp opening brings up its viewer, an effect applied brings up Effect Controls).
+    /// A closed panel goes back where it was; one never laid out goes to its usual place: the
+    /// Composition panel in the centre with the Layer panel and other viewers (with none of
+    /// those left, above the Timeline), Layer and the viewers beside the Composition panel, and
+    /// so on.
     pub fn raise_panel(&mut self, p: PanelKind) {
-        if self.ui.floating.iter().any(|group| group.panels.contains(&p)) {
-            self.edit_layout(|layout| layout.apply(craft_ui::docking::Action::Activate { panel: p }).is_ok());
-            return;
-        }
-        if !self.ui.dock.contains(p) {
-            // The Composition panel lives in the centre, with the Layer panel and other viewers;
-            // with none of those left, above the Timeline.
-            let centre = |d: &dock::DockNode| {
-                let mut v = Vec::new();
-                d.panels(&mut v);
-                v.into_iter().find(|q| matches!(q, PanelKind::Layer | PanelKind::Viewer(_) | PanelKind::Flowchart | PanelKind::Footage))
-            };
+        if !self.ui.dock.is_open(p) {
+            let docked = |q: &PanelKind| self.ui.dock.is_docked(*q);
             let near = match p {
-                PanelKind::Composition => match centre(&self.ui.dock) {
-                    Some(q) => q,
-                    None if self.ui.dock.dock_panel(p, PanelKind::Timeline, dock::Zone::Top) => {
-                        self.ui.dock.activate(p);
-                        return;
-                    }
-                    None => PanelKind::EffectsPresets,
-                },
-                PanelKind::Layer | PanelKind::Flowchart | PanelKind::Viewer(_) => PanelKind::Composition,
-                PanelKind::RenderQueue => PanelKind::Timeline,
-                PanelKind::EffectControls | PanelKind::History => PanelKind::Project,
-                _ => PanelKind::EffectsPresets,
+                PanelKind::Composition => self
+                    .ui
+                    .dock
+                    .panels()
+                    .into_iter()
+                    .find(|q| matches!(q, PanelKind::Layer | PanelKind::Viewer(_) | PanelKind::Flowchart | PanelKind::Footage) && docked(q)),
+                PanelKind::Layer | PanelKind::Flowchart | PanelKind::Viewer(_) => Some(PanelKind::Composition),
+                PanelKind::RenderQueue => Some(PanelKind::Timeline),
+                PanelKind::EffectControls | PanelKind::History => Some(PanelKind::Project),
+                _ => Some(PanelKind::EffectsPresets),
+            }
+            .filter(|q| self.ui.dock.is_open(*q));
+            let mut workspace = self.ui.dock.clone();
+            let known = workspace.hidden.iter().any(|(q, _)| *q == p);
+            let opened = if p == PanelKind::Composition && near.is_none() && !known && self.ui.dock.is_docked(PanelKind::Timeline) {
+                workspace
+                    .apply(
+                        craft_ui::docking::Action::OpenAt {
+                            panel: p,
+                            anchor: PanelKind::Timeline,
+                            placement: craft_ui::docking::Placement::Split(craft_ui::docking::Zone::Top),
+                        },
+                        dock::permissions,
+                    )
+                    .map(|_| ())
+            } else if known {
+                workspace.set_visible(p, true, near, dock::permissions)
+            } else {
+                workspace.apply(craft_ui::docking::Action::Open { panel: p, anchor: near }, dock::permissions).map(|_| ())
             };
-            self.ui.dock.open_near(p, near);
+            match opened {
+                Ok(()) => self.ui.dock = workspace,
+                Err(e) => {
+                    self.ui.status = format!("can't open {}: {e}", p.title());
+                    return;
+                }
+            }
         }
-        self.ui.dock.activate(p);
+        let _ = self.ui.dock.apply(craft_ui::docking::Action::Activate { panel: p }, dock::permissions);
+        if self.ui.dock.is_floating(p) {
+            self.pending_panel_raise = Some(p);
+        }
     }
 
     pub fn render_source(&self) -> RenderSource {
@@ -997,7 +1009,7 @@ impl EffectcraftApp {
         }
         let restore_max = preset.full_screen.then_some(self.ui.maximized);
         let viewer = panels::viewers::active_panel(self);
-        if preset.full_screen && self.ui.dock.contains(viewer) {
+        if preset.full_screen && self.ui.dock.is_docked(viewer) {
             self.ui.maximized = Some(viewer);
         }
         self.playback = Playback {

@@ -8,7 +8,7 @@
 use serde_json::{Value, json};
 
 use crate::EffectcraftApp;
-use crate::dock::PanelKind;
+use crate::dock::{PanelKind, WorkspaceExt as _};
 use crate::state::{Resolution, Tool};
 use effectcraft_engine::menus::{MenuEntry, MenuNode};
 
@@ -415,6 +415,11 @@ pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: V
     if crate::panels::layer_styles_dialog::route(app, id, &params)? {
         return Ok(Value::Null);
     }
+    // Shared docking: `window.dockAction`, craft-ui's `window.panel.*` commands, `ui.dock`,
+    // `ui.dock.reset` and `window.panelWindow`.
+    if let Some(result) = crate::dock_ui::route(app, ctx, id, &params) {
+        return result;
+    }
     // Legacy per-panel / per-workspace ids (`window.panel.Project`, `window.workspace.default`).
     if let Some(rest) = id.strip_prefix("window.panel.") {
         return frontend(app, ctx, "window.panel", json!({"panel": rest}));
@@ -502,46 +507,6 @@ pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: V
             _ => {}
         }
     }
-    if id == "window.dockAction" {
-        let value = params.get("action").cloned().ok_or("missing docking action")?;
-        let action: craft_ui::docking::Action<PanelKind> = serde_json::from_value(value).map_err(|error| format!("invalid docking action: {error}"))?;
-        if matches!(&action, craft_ui::docking::Action::Open { .. } | craft_ui::docking::Action::OpenAt { .. }) {
-            return Err("use the panel open commands to preserve viewer and ScriptUI lifecycle callbacks".into());
-        }
-        if let craft_ui::docking::Action::Close { panel } = &action {
-            let mut layout = crate::dock_shared::encode(&app.ui.dock, &app.ui.floating)?;
-            layout.apply(action.clone()).map_err(|error| error.to_string())?;
-            app.close_panel(*panel);
-            return Ok(Value::Null);
-        }
-        let mut error = None;
-        if !app.edit_layout(|layout| match layout.apply(action) {
-            Ok(()) => true,
-            Err(reason) => {
-                error = Some(reason);
-                false
-            }
-        }) {
-            return Err(error.unwrap_or_else(|| "invalid docking layout".into()));
-        }
-        return Ok(Value::Null);
-    }
-    // Multiple monitors: {panel, window?: bool} moves a panel into its own native window (or
-    // back into the main window; no `window` toggles).
-    if id == "window.panelWindow" {
-        // A panel name ("Info", "Effect Controls") or its serialized form ({"Viewer": 2}).
-        let value = params.get("panel").ok_or("panelWindow: need `panel`")?;
-        let panel = match value.as_str() {
-            Some(name) => PanelKind::from_name(name).ok_or(format!("unknown panel `{name}`"))?,
-            None => serde_json::from_value::<PanelKind>(value.clone()).map_err(|_| "panelWindow: unknown `panel`".to_string())?,
-        };
-        let window = match params.get("window") {
-            None | Some(Value::Null) => None,
-            Some(value) => Some(value.as_bool().ok_or("panelWindow: `window` must be true or false")?),
-        };
-        let window = app.set_panel_window(ctx, panel, window)?;
-        return Ok(json!({"window": window}));
-    }
     // A UI-only command (not in the engine's menus), so `frontend` gets it from here.
     if id == "window.maximizeApp" {
         return frontend(app, ctx, id, params);
@@ -560,7 +525,9 @@ pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: V
             }
             "closePanel" => {
                 let p = panel_of("panel").ok_or("closePanel: need `panel`")??;
-                app.close_panel(p);
+                if app.ui.dock.is_open(p) {
+                    app.apply_dock(craft_ui::docking::Action::Close { panel: p })?;
+                }
                 return Ok(Value::Null);
             }
             "floatPanel" => {
@@ -569,22 +536,31 @@ pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: V
                     Some(value) => serde_json::from_value::<[f32; 4]>(value.clone()).map_err(|_| "rect must contain four finite numbers")?,
                     None => crate::dock_ui::default_float_rect(ctx.content_rect()),
                 };
-                if !app.edit_layout(|l| l.float(p, r)) {
-                    return Err(format!("can't undock {}", p.title()));
-                }
+                app.apply_dock(craft_ui::docking::Action::Float { panel: p, rect: r }).map_err(|e| format!("can't undock {}: {e}", p.title()))?;
                 return Ok(Value::Null);
             }
             _ => {
+                // craft-ui's `window.panel.dock`: zones center/tab, left/right/top/bottom (a split
+                // beside the anchor), above/below; without an anchor a side zone docks along that
+                // edge of the whole workspace.
                 let p = panel_of("panel").ok_or("dockPanel: need `panel`")??;
-                let anchor = panel_of("anchor").ok_or("dockPanel: need `anchor` (a docked panel)")??;
-                let zone = params
-                    .get("zone")
-                    .and_then(Value::as_str)
-                    .map_or(Some(crate::dock::Zone::Center), crate::dock::Zone::from_name)
-                    .ok_or("zone: center|left|right|top|bottom")?;
-                if !app.edit_layout(|l| l.dock(p, anchor, zone)) {
-                    return Err(format!("can't dock {} at {} ({zone:?})", p.title(), anchor.title()));
+                let mut command = json!({"command": "window.panel.dock", "panel": p});
+                if let Some(anchor) = panel_of("anchor") {
+                    command["anchor"] = json!(anchor?);
+                    command["zone"] = json!("center");
                 }
+                if let Some(zone) = params.get("zone") {
+                    let zone = zone.as_str().ok_or("zone: center|tab|left|right|top|bottom|above|below")?.to_ascii_lowercase();
+                    if command.get("anchor").is_some() || zone != "center" {
+                        command["zone"] = json!(zone);
+                    }
+                }
+                if let Some(before) = panel_of("before") {
+                    command["before"] = json!(before?);
+                }
+                let command: craft_ui::docking::DockCommand<PanelKind> =
+                    serde_json::from_value(command).map_err(|e| format!("dockPanel: zone: center|tab|left|right|top|bottom|above|below ({e})"))?;
+                app.run_dock_command(ctx, command).map_err(|e| format!("can't dock {}: {e}", p.title()))?;
                 app.show_panel(p);
                 return Ok(Value::Null);
             }
@@ -666,10 +642,7 @@ pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: V
         // Alt+Shift+, / Alt+Shift+.: the previous / next tab of the focused panel's group.
         "window.nextPanel" | "window.previousPanel" => {
             let focused = app.ui.focused;
-            let group: Vec<PanelKind> = match app.ui.floating.iter().find(|f| f.panels.contains(&focused)) {
-                Some(f) => f.panels.clone(),
-                None => app.ui.dock.group_of(focused).map(<[PanelKind]>::to_vec).unwrap_or_default(),
-            };
+            let group = app.ui.dock.group_of(focused);
             let Some(i) = group.iter().position(|p| *p == focused) else { return Ok(Value::Null) };
             let step = if id == "window.nextPanel" { 1 } else { group.len().saturating_sub(1) };
             if let Some(next) = group.get((i + step) % group.len().max(1)).copied() {
@@ -1174,7 +1147,6 @@ pub fn frontend(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, p: Valu
         "window.saveWorkspace" => {
             let name = app.ui.workspace.clone();
             app.ui.saved_workspaces.insert(name.clone(), app.ui.dock.clone());
-            app.ui.saved_floating.insert(name.clone(), app.ui.floating.clone());
             app.store_saved_workspaces()?;
             json!({"workspace": name})
         }
@@ -1190,7 +1162,6 @@ pub fn frontend(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, p: Valu
                 return Ok(Value::Null);
             };
             app.ui.saved_workspaces.insert(name.clone(), app.ui.dock.clone());
-            app.ui.saved_floating.insert(name.clone(), app.ui.floating.clone());
             app.ui.workspace = name.clone();
             app.store_saved_workspaces()?;
             json!({"workspace": name})
@@ -1213,7 +1184,6 @@ pub fn frontend(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, p: Valu
             };
             let builtin = crate::dock::WORKSPACES.contains(&name.as_str());
             if p.get("delete").and_then(Value::as_bool) == Some(true) {
-                app.ui.saved_floating.remove(&name);
                 if app.ui.saved_workspaces.remove(&name).is_none() && !builtin {
                     return Err(format!("no workspace `{name}`"));
                 }
@@ -1230,9 +1200,6 @@ pub fn frontend(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, p: Valu
                 }
                 let dock = app.ui.saved_workspaces.remove(&name).ok_or_else(|| format!("no workspace `{name}`"))?;
                 app.ui.saved_workspaces.insert(new.to_string(), dock);
-                if let Some(f) = app.ui.saved_floating.remove(&name) {
-                    app.ui.saved_floating.insert(new.to_string(), f);
-                }
                 if app.ui.workspace == name {
                     app.ui.workspace = new.to_string();
                 }
@@ -1571,10 +1538,10 @@ pub(crate) fn entry_shortcut(app: &EffectcraftApp, e: &MenuEntry) -> Option<Stri
 /// Whether panel `p` is on screen: the front tab of a floating window, or of a docked group
 /// (an open frame in a stack) that a maximized panel does not cover.
 pub(crate) fn panel_shown(app: &EffectcraftApp, p: PanelKind) -> bool {
-    if app.ui.floating.iter().any(|f| f.panels.get(f.active) == Some(&p)) {
-        return true;
+    if app.ui.dock.is_floating(p) {
+        return app.ui.dock.is_visible(p);
     }
-    match app.ui.maximized.filter(|m| app.ui.dock.contains(*m)) {
+    match app.ui.maximized.filter(|m| app.ui.dock.is_docked(*m)) {
         Some(m) => m == p,
         None => app.ui.dock.is_visible(p),
     }
@@ -2567,7 +2534,7 @@ mod tests {
         run(&mut app, "window.toggleCompTimeline");
         assert_eq!(app.ui.focused, PanelKind::Timeline);
         // Alt+Shift+. / Alt+Shift+,: the tabs of the focused panel's group, wrapping.
-        let group = app.ui.dock.group_of(PanelKind::Timeline).unwrap().to_vec();
+        let group = app.ui.dock.group_of(PanelKind::Timeline);
         assert!(group.len() > 1, "{group:?}");
         run(&mut app, "window.nextPanel");
         assert_eq!(app.ui.focused, group[(group.iter().position(|p| *p == PanelKind::Timeline).unwrap() + 1) % group.len()]);
@@ -2579,7 +2546,7 @@ mod tests {
         // With another panel active it closes that panel.
         app.show_panel(PanelKind::Project);
         run(&mut app, "window.closeAll");
-        assert!(!app.ui.dock.contains(PanelKind::Project));
+        assert!(!app.ui.dock.is_open(PanelKind::Project));
     }
 
     #[test]
