@@ -331,3 +331,21 @@ fn failed_close_preserves_viewer_lifecycle_and_maximize_state() {
     assert_eq!(app.ui.active_viewer, before.active_viewer);
     assert_eq!(app.ui.locked_tabs, before.locked_tabs);
 }
+
+/// A panel never laid out opens at EffectCraft's default place for it (History beside the
+/// Project panel, Render Queue with the Timeline), not where craft-ui's fallback puts it; a panel
+/// the user closed comes back where it was.
+#[test]
+fn never_placed_panels_open_at_their_default_place() {
+    let mut app = EffectcraftApp::new(Session::default());
+    assert!(!app.ui.dock.is_open(PanelKind::History));
+    invoke(&mut app, "window.panel", json!({"panel": "History"})).unwrap();
+    assert!(app.ui.dock.group_of(PanelKind::History).contains(&PanelKind::Project), "{:?}", app.ui.dock.group_of(PanelKind::History));
+    invoke(&mut app, "window.panel.activate", json!({"panel": "Tracker"})).unwrap();
+    assert!(app.ui.dock.group_of(PanelKind::Tracker).contains(&PanelKind::EffectsPresets) || app.ui.dock.is_open(PanelKind::Tracker));
+    // Closed by the user, it reopens at its recorded place.
+    invoke(&mut app, "window.dockPanel", json!({"panel": "History", "anchor": "Timeline"})).unwrap();
+    invoke(&mut app, "window.closePanel", json!({"panel": "History"})).unwrap();
+    invoke(&mut app, "window.panel", json!({"panel": "History"})).unwrap();
+    assert!(app.ui.dock.group_of(PanelKind::History).contains(&PanelKind::Timeline));
+}

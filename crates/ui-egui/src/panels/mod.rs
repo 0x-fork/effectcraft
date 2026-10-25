@@ -234,8 +234,16 @@ pub fn panel_menu_popup(app: &mut EffectcraftApp, ui: &mut egui::Ui) {
                 let _ = app.dock_command(ui.ctx(), craft_ui::docking::Action::Float { panel, rect: r });
                 close = true;
             }
-            // D2: Move Panel to New Window / Main Window returns here once craft-ui's native
-            // windows draw the window (`window.panelWindow` records the place meanwhile).
+            // Multiple monitors: a native window of its own, which can go on another screen.
+            // D2: craft-ui's native windows draw it; until then the place is recorded and the
+            // panel floats in the main window.
+            if !ui.ctx().embed_viewports() {
+                let windowed = app.in_panel_window(panel);
+                if ui.button(if windowed { tr("Move Panel to Main Window") } else { tr("Move Panel to New Window") }).clicked() {
+                    let _ = crate::menus::invoke(app, &ui.ctx().clone(), "window.panelWindow", serde_json::json!({"panel": panel, "window": !windowed}));
+                    close = true;
+                }
+            }
             if !floating && ui.button(if app.ui.maximized == Some(panel) { tr("Restore Panel Size") } else { tr("Maximize Panel") }).clicked() {
                 app.toggle_maximize(panel);
                 close = true;

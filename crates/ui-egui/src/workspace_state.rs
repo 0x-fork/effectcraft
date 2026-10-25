@@ -361,12 +361,12 @@ mod tests {
         let config = MemoryConfig::default();
         let mut ui = UiState::default();
         let mut store = WorkspaceStore::load(Some(&config), &mut ui);
-        ui.dock.apply(Action::Float { panel: PanelKind::Info, rect: [10.0, 10.0, 300.0, 200.0] }, crate::dock::permissions).unwrap();
-        ui.dock.apply(Action::SetNative { panel: PanelKind::Info, rect: Some([90_000.0, -90_000.0, 1.0e5, 0.5]) }, crate::dock::permissions).unwrap();
+        ui.dock.apply(Action::Float { panel: PanelKind::Project, rect: [10.0, 10.0, 300.0, 200.0] }, crate::dock::permissions).unwrap();
+        ui.dock.apply(Action::SetNative { panel: PanelKind::Project, rect: Some([90_000.0, -90_000.0, 1.0e5, 0.5]) }, crate::dock::permissions).unwrap();
         assert!(store.save(Some(&config), &ui).unwrap());
         let mut restored = UiState::default();
         WorkspaceStore::load(Some(&config), &mut restored);
-        let native = restored.dock.layout.floating.iter().find(|w| w.contains(&PanelKind::Info)).and_then(|w| w.native).unwrap();
+        let native = restored.dock.layout.floating.iter().find(|w| w.contains(&PanelKind::Project)).and_then(|w| w.native).unwrap();
         assert_eq!(native, crate::dock_ui::sanitized_window_rect(native));
         assert!(native[2] <= crate::dock_ui::PANEL_WINDOW_MAX && native[3] >= crate::dock_ui::PANEL_WINDOW_MIN[1]);
     }
