@@ -10,8 +10,8 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod analysis;
 pub mod autosave;
-pub mod camera_track;
 pub mod cmd;
 pub mod config;
 pub mod demo;
@@ -24,11 +24,9 @@ pub mod jobs;
 pub mod learn;
 pub mod links;
 pub mod logging;
-pub mod mask_track;
 pub mod media_browser;
 pub mod media_cache;
 pub mod menus;
-pub mod models;
 pub mod offload;
 pub mod perf;
 pub mod prefs;
@@ -36,7 +34,6 @@ pub mod preview;
 pub mod psd_import;
 pub mod remote;
 pub mod render_queue;
-pub mod roto;
 pub mod scriptui;
 pub mod sequence;
 mod session_settings;
@@ -44,10 +41,8 @@ pub mod shortcuts;
 pub mod storage;
 pub mod sysinfo;
 pub mod templates;
-pub mod tracking;
 pub mod vector;
 pub mod viewer;
-pub mod warp;
 pub mod xml_project;
 
 use std::sync::Arc;
@@ -59,6 +54,12 @@ use effectcraft_time::Tick;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub use analysis::camera_track;
+pub use analysis::mask_track;
+pub use analysis::models;
+pub use analysis::roto;
+pub use analysis::tracking;
+pub use analysis::warp;
 pub use cmd as commands;
 pub use cmd::{CommandSpec, command_specs, find as find_command};
 pub use effectcraft_color as color;
@@ -1487,4 +1488,3 @@ pub fn font_menu(prefs: &prefs::Prefs) -> Vec<FontRow> {
     out.extend(all.iter().map(|f| row(f, false)));
     out
 }
-
