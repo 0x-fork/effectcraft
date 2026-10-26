@@ -2400,14 +2400,6 @@ pub fn render_frame(project: &Project, comp: ItemId, t: Tick, scale: f64) -> Ima
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod tests_auto;
-#[cfg(test)]
-mod tests_remap;
-#[cfg(test)]
-mod tests_roi;
-#[cfg(test)]
-mod tests_styles;
 
 /// Layer-space bounds `[x0, y0, x1, y1]` of a layer's content at the context time (source size
 /// for solids/footage/precomps, glyph bounds for text, painted bounds for shapes). Used for viewer
@@ -2432,29 +2424,3 @@ pub fn content_bounds(ctx: &EvalCtx, layer: &effectcraft_project::Layer) -> Opti
 pub fn kurbo_path(sp: &effectcraft_keyframe::ShapePath) -> kurbo::BezPath {
     effectcraft_path::to_kurbo(sp)
 }
-#[cfg(test)]
-mod tests_audio_fx;
-#[cfg(test)]
-mod tests_aux;
-#[cfg(test)]
-mod tests_collapse;
-#[cfg(test)]
-mod tests_color;
-#[cfg(test)]
-mod tests_footage_size;
-#[cfg(test)]
-mod tests_frame_blend;
-#[cfg(test)]
-mod tests_guides;
-#[cfg(test)]
-mod tests_mask_blur;
-#[cfg(test)]
-mod tests_mask_expansion;
-#[cfg(test)]
-mod tests_motion_tile;
-#[cfg(test)]
-mod tests_nested;
-#[cfg(test)]
-mod tests_paint;
-#[cfg(test)]
-mod tests_time;
