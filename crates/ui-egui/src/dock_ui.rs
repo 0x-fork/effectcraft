@@ -436,13 +436,13 @@ impl EffectcraftApp {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).id_salt("effectcraft-dock-area"));
         child.set_clip_rect(body.intersect(ui.clip_rect()));
         let docs = self.tab_docs();
-        let doc_width = dock::doc_tabs_width(ui, &docs);
         let ime = NativeIme::new(&layout.floating, &self.unpublished_viewports);
         let mut content = EffectContent {
             titles: self.tab_titles(),
             swatches: self.tab_swatches(),
             docs,
-            doc_width,
+            ctx: ctx.clone(),
+            style: style.clone(),
             app: self,
             tokens: t,
             doc_actions: Vec::new(),
@@ -632,8 +632,9 @@ struct EffectContent<'a> {
     titles: Vec<(PanelKind, String)>,
     swatches: Vec<(PanelKind, egui::Color32)>,
     docs: Vec<DocTab>,
-    /// The width the comp tabs take in the Timeline's tab strip.
-    doc_width: f32,
+    /// Measures tab labels for the group header's width.
+    ctx: egui::Context,
+    style: DockStyle,
     doc_actions: Vec<DocAction>,
     /// Viewer locks clicked.
     locks: Vec<PanelKind>,
@@ -748,10 +749,37 @@ fn window_bodies(window: &Floating<PanelKind>) -> usize {
 }
 
 impl EffectContent<'_> {
-    fn header_width(&self, active: PanelKind, strip_width: f32) -> f32 {
-        let lock = if has_lock(active) { LOCK_W } else { 0.0 };
-        let docs = if active == PanelKind::Timeline && !self.docs.is_empty() { self.doc_width } else { 0.0 };
-        (docs + lock + MENU_W).min(strip_width * 2.0 / 3.0).max(MENU_W)
+    /// The header holds the shown panel's lock and ≡ at the strip's end and, in the Timeline's
+    /// group, the comp tabs before them. craft-ui puts the header after the group's drag bar, so
+    /// the comp tabs follow the panel tabs only when the header takes all the room the panel tabs
+    /// and the bar leave. The panel tabs keep their full width; comps without room go to ».
+    fn header_width(&self, panels: &[PanelKind], active: PanelKind, strip_width: f32) -> f32 {
+        let tools = if has_lock(active) { LOCK_W } else { 0.0 } + MENU_W;
+        if self.docs.is_empty() || !panels.contains(&PanelKind::Timeline) {
+            return tools.min(strip_width * 2.0 / 3.0).max(MENU_W);
+        }
+        let tabs: f32 = panels.iter().map(|p| self.tab_width(p)).sum();
+        // Half a point keeps rounding from shrinking the panel tabs.
+        let room = strip_width - tabs - self.style.drag_bar_width - 0.5;
+        room.max(tools + dock::DOC_OVERFLOW).min(strip_width).max(0.0)
+    }
+
+    /// A panel tab's width as craft-ui lays it out: its label and the tab padding.
+    fn tab_width(&self, panel: &PanelKind) -> f32 {
+        let logical = self.logical_label(panel);
+        let (font, color) = (&self.style.font, self.style.text);
+        dock::text_width(&self.ctx, self.tab_job(panel, &logical, font, color)) + dock::TAB_PADDING
+    }
+
+    /// A panel tab's text: what the panel shows, after the label swatch of its comp or layer.
+    fn tab_job(&self, panel: &PanelKind, logical: &str, font: &egui::FontId, color: egui::Color32) -> egui::text::LayoutJob {
+        let title = self.titles.iter().find(|(p, _)| p == panel).map_or(logical, |(_, s)| s.as_str());
+        let mut job = egui::text::LayoutJob::default();
+        if let Some((_, swatch)) = self.swatches.iter().find(|(p, _)| p == panel) {
+            job.append("■ ", 0.0, egui::TextFormat::simple(font.clone(), *swatch));
+        }
+        job.append(title, 0.0, egui::TextFormat::simple(font.clone(), color));
+        job
     }
 }
 
@@ -785,23 +813,22 @@ impl DockContent<PanelKind> for EffectContent<'_> {
     }
 
     /// The tab names what the panel shows ("Composition Intro"), after the label swatch of its
-    /// comp or layer. With comps open, the Timeline's own tab is just "Timeline"; its comp tabs
-    /// are in the group header.
+    /// comp or layer. With comps open, the Timeline's own tab is just "Timeline"; each comp has a
+    /// tab of its own after the group's panel tabs.
     fn label(&mut self, _ui: &egui::Ui, panel: &PanelKind, logical: &str, font: &egui::FontId, color: egui::Color32) -> egui::WidgetText {
-        let title = self.titles.iter().find(|(p, _)| p == panel).map_or(logical, |(_, s)| s.as_str());
-        let Some((_, swatch)) = self.swatches.iter().find(|(p, _)| p == panel) else { return title.into() };
-        let mut job = egui::text::LayoutJob::default();
-        job.append("■ ", 0.0, egui::TextFormat::simple(font.clone(), *swatch));
-        job.append(title, 0.0, egui::TextFormat::simple(font.clone(), color));
-        job.into()
+        if self.swatches.iter().any(|(p, _)| p == panel) {
+            return self.tab_job(panel, logical, font, color).into();
+        }
+        self.titles.iter().find(|(p, _)| p == panel).map_or(logical, |(_, s)| s.as_str()).into()
     }
 
-    fn group_header_width(&self, _panels: &[PanelKind], active: &PanelKind, _floating: bool, strip_width: f32) -> f32 {
-        self.header_width(*active, strip_width)
+    fn group_header_width(&self, panels: &[PanelKind], active: &PanelKind, _floating: bool, strip_width: f32) -> f32 {
+        self.header_width(panels, *active, strip_width)
     }
 
-    /// The Timeline's comp tabs, the viewer lock and the ≡ panel menu of the shown panel.
-    fn group_header(&mut self, ui: &mut egui::Ui, _panels: &[PanelKind], active: &PanelKind, _floating: bool) {
+    /// The Timeline's comp tabs (in its group, whichever panel is shown), then the viewer lock
+    /// and the ≡ panel menu of the shown panel.
+    fn group_header(&mut self, ui: &mut egui::Ui, panels: &[PanelKind], active: &PanelKind, _floating: bool) {
         let t = self.tokens;
         let header = ui.max_rect();
         let menu = Rect::from_min_max(pos2((header.max.x - MENU_W).max(header.min.x), header.min.y), header.max);
@@ -814,9 +841,10 @@ impl DockContent<PanelKind> for EffectContent<'_> {
                 self.locks.push(*active);
             }
         }
-        if *active == PanelKind::Timeline && !self.docs.is_empty() {
+        if panels.contains(&PanelKind::Timeline) && !self.docs.is_empty() {
             let strip = Rect::from_min_max(header.min, pos2(end.max(header.min.x), header.max.y));
-            self.doc_actions.extend(dock::doc_tabs(ui, strip, &self.docs, &t, &mut self.app.auto));
+            let selected = *active == PanelKind::Timeline;
+            self.doc_actions.extend(dock::doc_tabs(ui, strip, &self.docs, selected, &self.style, &mut self.app.auto));
         }
         let rect = Rect::from_center_size(menu.center(), vec2(18.0, 18.0));
         let response = ui.interact(rect, egui::Id::unique(("panel-menu-button", active.id())), Sense::click());
