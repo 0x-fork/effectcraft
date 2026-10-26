@@ -11,9 +11,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod analysis;
-pub mod autosave;
 pub mod cmd;
-pub mod config;
 pub mod demo;
 pub mod doc_path;
 pub mod footage_check;
@@ -29,15 +27,13 @@ pub mod media_cache;
 pub mod menus;
 pub mod offload;
 pub mod perf;
-pub mod prefs;
 pub mod preview;
 pub mod psd_import;
 pub mod remote;
 pub mod render_queue;
 pub mod scriptui;
 pub mod sequence;
-mod session_settings;
-pub mod shortcuts;
+mod settings;
 pub mod storage;
 pub mod sysinfo;
 pub mod templates;
@@ -75,6 +71,10 @@ pub use effectcraft_time as time;
 pub use effectcraft_track as track;
 pub use history::{Branch, History, HistoryNode};
 pub use render_queue::{ExportJob, ExportResult, Exporter, JobState};
+pub use settings::autosave;
+pub use settings::config;
+pub use settings::prefs;
+pub use settings::shortcuts;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
