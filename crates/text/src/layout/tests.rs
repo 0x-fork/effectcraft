@@ -313,11 +313,8 @@ fn hanging_punctuation_overhangs_the_box() {
     let p = ParagraphStyle { width: Some(400.0), hanging: true, ..Default::default() };
     let l = layout_rich_uncached(text, &[(0..text.len(), s.clone())], &[p]);
     assert!(l.lines[0].x < -1.0, "opening quote hangs left: {}", l.lines[0].x);
-    let r = layout_rich_uncached(
-        text,
-        &[(0..text.len(), s)],
-        &[ParagraphStyle { width: Some(400.0), hanging: true, align: Align::Right, ..Default::default() }],
-    );
+    let r =
+        layout_rich_uncached(text, &[(0..text.len(), s)], &[ParagraphStyle { width: Some(400.0), hanging: true, align: Align::Right, ..Default::default() }]);
     assert!(r.lines[0].x + r.lines[0].width > 401.0, "closing quote hangs right");
 }
 
@@ -348,13 +345,8 @@ fn rtl_paragraph_carets_run_right_to_left() {
 fn named_instance_sets_the_base_variations() {
     const FAMILY: &str = "EffectCraft Layout Instance Test";
     fonts::add_font_data(crate::sfnt::test_font::variable(FAMILY, &[("Light", 300.0, None), ("Black", 900.0, None)], true));
-    let st = |style: &str, variations: Vec<(String, f32)>| TextStyle {
-        family: FAMILY.into(),
-        style: style.into(),
-        size: 50.0,
-        variations,
-        ..Default::default()
-    };
+    let st =
+        |style: &str, variations: Vec<(String, f32)>| TextStyle { family: FAMILY.into(), style: style.into(), size: 50.0, variations, ..Default::default() };
     let coords = |l: &Layout| l.glyphs.iter().map(|g| crate::variable::coords(g.variations).to_vec()).collect::<Vec<_>>();
     let black = layout_uncached("Hi", &st("Black", vec![]), &ParagraphStyle::default());
     assert!(!black.glyphs.is_empty());

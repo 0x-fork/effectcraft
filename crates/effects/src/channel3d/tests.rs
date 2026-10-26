@@ -279,11 +279,7 @@ fn cryptomatte_cpu_path_is_bit_exact_inside_and_outside_the_aux_area() {
         };
         for (x, y) in [(0u32, 0u32), (1, 0), (5, 0), (0, 1), (3, 1), (5, 1)] {
             let (c, m) = reduce_by_name(&a, "CryptoObject", &edge_selection(), (y * 6 + x) as usize);
-            assert_eq!(
-                out.get(x as i64, y as i64).map(f32::to_bits),
-                expect(c, m).map(f32::to_bits),
-                "display {display} matteOnly {matte_only} at ({x}, {y})"
-            );
+            assert_eq!(out.get(x as i64, y as i64).map(f32::to_bits), expect(c, m).map(f32::to_bits), "display {display} matteOnly {matte_only} at ({x}, {y})");
         }
         for (x, y) in [(6u32, 0u32), (19, 0), (0, 2), (12, 9)] {
             assert_eq!(

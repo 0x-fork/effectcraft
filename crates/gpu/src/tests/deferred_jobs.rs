@@ -8,10 +8,10 @@ use effectcraft_render::three_d::adv;
 use effectcraft_render::{Accelerator, Backend, LayerCache, NoFootage, RenderOpts, Renderer};
 use effectcraft_time::Tick;
 
-use crate::tests::{Pattern, diff, n, tolerance};
 use crate::tests::adv3d::{off_share, run_of, scene, scene_project};
 use crate::tests::deferred::{deferred_gpu, render_passes};
 use crate::tests::particles::{Host, agree, params};
+use crate::tests::{Pattern, diff, n, tolerance};
 
 /// The device's readbacks have landed (the browser's event loop; natively a poll).
 fn settle(g: &crate::Gpu) {

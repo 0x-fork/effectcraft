@@ -90,10 +90,7 @@ fn ime_delete_surrounding_chars_keeps_the_selection_for_the_commit() {
     let (mut app, lid) = editor("abcdef", 1, 4);
     feed(
         &mut app,
-        vec![
-            egui::Event::Ime(egui::ImeEvent::DeleteSurrounding { before_chars: 1, after_chars: 99 }),
-            egui::Event::Ime(egui::ImeEvent::Commit("XY".into())),
-        ],
+        vec![egui::Event::Ime(egui::ImeEvent::DeleteSurrounding { before_chars: 1, after_chars: 99 }), egui::Event::Ime(egui::ImeEvent::Commit("XY".into()))],
     );
     assert_eq!(doc_text(&app, lid), "XY", "the commit replaces the selection");
     app.session.execute("edit.undo", json!({})).unwrap();
@@ -418,9 +415,8 @@ fn an_application_edit_in_the_same_frame_dominates_the_ime_cause() {
     let (mut app, lid) = editor("ab", 2, 2);
     let mut pass = ImePass::new(egui::ViewportId::ROOT);
     pass.frame(&mut app, vec![], true, false).expect("editing");
-    let mixed = pass
-        .frame(&mut app, vec![egui::Event::Text("x".into()), egui::Event::Ime(egui::ImeEvent::Commit("日".into()))], true, false)
-        .expect("still editing");
+    let mixed =
+        pass.frame(&mut app, vec![egui::Event::Text("x".into()), egui::Event::Ime(egui::ImeEvent::Commit("日".into()))], true, false).expect("still editing");
     assert_eq!(doc_text(&app, lid), "abx日");
     assert_eq!(mixed.change_cause, egui::ImeChangeCause::Other, "the earlier application edit dominates");
 
@@ -428,9 +424,8 @@ fn an_application_edit_in_the_same_frame_dominates_the_ime_cause() {
     let (mut app, lid) = editor("ab", 2, 2);
     let mut pass = ImePass::new(egui::ViewportId::ROOT);
     pass.frame(&mut app, vec![], true, false).expect("editing");
-    let mixed = pass
-        .frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Commit("日".into())), egui::Event::Text("x".into())], true, false)
-        .expect("still editing");
+    let mixed =
+        pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Commit("日".into())), egui::Event::Text("x".into())], true, false).expect("still editing");
     assert_eq!(doc_text(&app, lid), "ab日x");
     assert_eq!(mixed.change_cause, egui::ImeChangeCause::Other, "the later application edit dominates");
 }
@@ -520,8 +515,7 @@ fn a_failed_batch_with_a_transient_edit_does_not_revive_a_wide_selection_composi
     let (mut app, lid) = editor(&text, 0, 5000);
     let mut pass = ImePass::new(egui::ViewportId::ROOT);
     pass.frame(&mut app, vec![], true, false).expect("editing");
-    pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Preedit { text: "に".into(), active_range_chars: None })], true, false)
-        .expect("still editing");
+    pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Preedit { text: "に".into(), active_range_chars: None })], true, false).expect("still editing");
     let owner = ime_owner(&app).expect("an editor owner");
     assert!(matches!(
         pass.ctx.data(|d| d.get_temp::<ImeComposition>(ime_composition_id(pass.viewport))),
@@ -556,8 +550,7 @@ fn a_wide_content_change_invalidates_the_active_composition() {
     let (mut app, lid) = editor(&text, 0, 5000);
     let mut pass = ImePass::new(egui::ViewportId::ROOT);
     pass.frame(&mut app, vec![], true, false).expect("editing");
-    pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Preedit { text: "に".into(), active_range_chars: None })], true, false)
-        .expect("still editing");
+    pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Preedit { text: "に".into(), active_range_chars: None })], true, false).expect("still editing");
 
     let replaced = "b".repeat(5000);
     app.session.execute("layer.setText", json!({"layer": lid.0, "text": replaced})).unwrap();
@@ -578,8 +571,7 @@ fn a_wide_selection_change_invalidates_the_active_composition() {
     let (mut app, lid) = editor(&text, 0, 5000);
     let mut pass = ImePass::new(egui::ViewportId::ROOT);
     pass.frame(&mut app, vec![], true, false).expect("editing");
-    pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Preedit { text: "に".into(), active_range_chars: None })], true, false)
-        .expect("still editing");
+    pass.frame(&mut app, vec![egui::Event::Ime(egui::ImeEvent::Preedit { text: "に".into(), active_range_chars: None })], true, false).expect("still editing");
 
     // Still wider than the IME window limit, so this exercises the unavailable-text
     // selection identity rather than merely making the surrounding text available.

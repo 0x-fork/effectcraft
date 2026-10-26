@@ -12,14 +12,14 @@ use crate::{Outcome, run_code};
 
 mod callable;
 mod ease_presets;
+mod evalfile;
 mod include;
 mod panels;
+#[cfg(not(windows))]
+mod services;
 mod tasks;
 mod ui;
 mod ui_more;
-mod evalfile;
-#[cfg(not(windows))]
-mod services;
 mod ui_mouse;
 
 fn session() -> Session {

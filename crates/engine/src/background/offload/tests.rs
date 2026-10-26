@@ -189,11 +189,8 @@ impl Offload for Inline {
 
 #[test]
 fn render_runs_through_the_offload() {
-    let mut s = Session {
-        exporter: Some(Arc::new(crate::rq_tests::MockExporter { log: Default::default() })),
-        offload: Some(Arc::new(Inline)),
-        ..Default::default()
-    };
+    let mut s =
+        Session { exporter: Some(Arc::new(crate::rq_tests::MockExporter { log: Default::default() })), offload: Some(Arc::new(Inline)), ..Default::default() };
     s.execute("file.openDemoProject", serde_json::json!({})).unwrap();
     s.execute("renderQueue.add", serde_json::json!({"output": "/x.gif"})).unwrap();
     let ids = s.start_render(false).unwrap();

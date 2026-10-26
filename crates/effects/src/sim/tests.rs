@@ -320,9 +320,8 @@ fn particle_world_effect_camera() {
         assert!(finite(&with(std::slice::from_ref(&extra))), "{extra:?}");
     }
     // Moving the camera doesn't restart the simulation.
-    let key = |pr: &crate::Params| {
-        sim_key(&EffectCtx { params: pr, time: 1.0, layer_size: [48.0, 48.0], seed: 1, adjustment: false, env: EffectEnv::default() }, 1)
-    };
+    let key =
+        |pr: &crate::Params| sim_key(&EffectCtx { params: pr, time: 1.0, layer_size: [48.0, 48.0], seed: 1, adjustment: false, env: EffectEnv::default() }, 1);
     let mut moved = params.clone();
     moved.values.insert("extras/effectCamera/rotationZ".into(), num(30.0));
     assert_eq!(key(&params), key(&moved));

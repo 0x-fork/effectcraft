@@ -160,10 +160,8 @@ fn effects_use_a_custom_config() {
     let o = fx("ec.color.ociocolorspace", &[("sourceName", Value::Str("g2".into())), ("destinationName", Value::Str("default".into()))]);
     assert!((o[0] - 0.25).abs() < 1e-6 && (o[1] - 0.0625).abs() < 1e-6 && (o[2] - 1.0).abs() < 1e-6, "{o:?}");
     // Inverse direction.
-    let o = fx(
-        "ec.color.ociocolorspace",
-        &[("sourceName", Value::Str("g2".into())), ("destinationName", Value::Str("lin".into())), ("direction", Value::Enum(1))],
-    );
+    let o =
+        fx("ec.color.ociocolorspace", &[("sourceName", Value::Str("g2".into())), ("destinationName", Value::Str("lin".into())), ("direction", Value::Enum(1))]);
     assert!((o[0] - 0.5f32.sqrt()).abs() < 1e-6, "{o:?}");
     // Display ▸ view → its colour space.
     let o = fx(

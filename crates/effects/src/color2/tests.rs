@@ -7,8 +7,7 @@ fn run(id: &str, img: &Image, over: &[(&str, Value)]) -> Image {
     for (k, v) in over {
         params.values.insert(k.to_string(), v.clone());
     }
-    let ctx =
-        EffectCtx { params: &params, time: 0.0, layer_size: [img.width as f64, img.height as f64], seed: 1, adjustment: false, env: Default::default() };
+    let ctx = EffectCtx { params: &params, time: 0.0, layer_size: [img.width as f64, img.height as f64], seed: 1, adjustment: false, env: Default::default() };
     (s.render)(&ctx, Buf { img: img.clone(), offset: [0.0, 0.0], scale: 1.0 }).img
 }
 
@@ -331,11 +330,8 @@ fn auto_levels_temporal_smoothing_reads_neighbour_frames() {
 fn shadow_highlight_clip_keeps_the_tonal_range() {
     let img = ramp();
     let lift = [("autoAmounts", Value::Bool(false)), ("shadowAmount", num(80.0))];
-    let unclipped = run(
-        "ec.color.shadowhighlight",
-        &img,
-        &[lift[0].clone(), lift[1].clone(), ("moreOptions/blackClip", num(0.0)), ("moreOptions/whiteClip", num(0.0))],
-    );
+    let unclipped =
+        run("ec.color.shadowhighlight", &img, &[lift[0].clone(), lift[1].clone(), ("moreOptions/blackClip", num(0.0)), ("moreOptions/whiteClip", num(0.0))]);
     let clipped = run("ec.color.shadowhighlight", &img, &[lift[0].clone(), lift[1].clone(), ("moreOptions/blackClip", num(1.0))]);
     let min = |im: &Image| im.data.iter().filter(|p| p[3] > 0.99).map(|p| luminance(p[0], p[1], p[2])).fold(f32::MAX, f32::min);
     assert!(min(&clipped) < min(&unclipped));

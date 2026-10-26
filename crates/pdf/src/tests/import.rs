@@ -1,8 +1,8 @@
 //! M13.12: CCITT images in PDF pages, EPS text and parser robustness over truncated and
 //! corrupt inputs (generated fixtures).
 
-use crate::*;
 use crate::tests::{coverage, page_pdf, render, shape_names};
+use crate::*;
 
 fn eps(body: &[u8]) -> Doc {
     let mut b = b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 200 100\n".to_vec();

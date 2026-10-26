@@ -67,8 +67,7 @@ fn brightness_contrast_modern_keeps_black_and_white_and_legacy_is_linear() {
 fn brightness_contrast_modern_matches_ae_ramp_samples() {
     let u8 = |v: f32| (v * 255.0).round() as i32;
     let go = |b: f64, c: f64, x: u8| {
-        u8(px("ec.color.brightnesscontrast", &[("brightness", num(b)), ("contrast", num(c))], [x as f32 / 255.0, x as f32 / 255.0, x as f32 / 255.0, 1.0])
-            [0])
+        u8(px("ec.color.brightnesscontrast", &[("brightness", num(b)), ("contrast", num(c))], [x as f32 / 255.0, x as f32 / 255.0, x as f32 / 255.0, 1.0])[0])
     };
     // (brightness, contrast, input, AE 8-bit)
     let samples: &[(f64, f64, u8, u8)] = &[
@@ -96,11 +95,8 @@ fn brightness_contrast_modern_matches_ae_ramp_samples() {
 /// (153, 51, 51), (204, 153, 128).
 #[test]
 fn tritone_matches_after_effects() {
-    let colours = [
-        ("highlights", Value::Color([1.0, 1.0, 0.8, 1.0])),
-        ("midtones", Value::Color([0.6, 0.2, 0.2, 1.0])),
-        ("shadows", Value::Color([0.0, 0.0, 0.3, 1.0])),
-    ];
+    let colours =
+        [("highlights", Value::Color([1.0, 1.0, 0.8, 1.0])), ("midtones", Value::Color([0.6, 0.2, 0.2, 1.0])), ("shadows", Value::Color([0.0, 0.0, 0.3, 1.0]))];
     let near = |o: [f32; 4], ae: [f32; 3]| (0..3).all(|i| (o[i] * 255.0 - ae[i]).abs() <= 1.0);
     let mut red = colours.to_vec();
     red.push(("blend", num(25.0)));
@@ -245,11 +241,8 @@ fn exposure_individual_channels_and_bypass() {
     let raw = px("ec.color.exposure", &[("master/exposure", num(1.0)), ("bypassLinearLight", Value::Bool(true))], [0.25, 0.25, 0.25, 1.0]);
     assert!((raw[0] - 0.5).abs() < 1e-5);
     // Negative results are mirrored, not clipped.
-    let neg = px(
-        "ec.color.exposure",
-        &[("master/offset", num(-0.5)), ("bypassLinearLight", Value::Bool(true)), ("master/gamma", num(2.0))],
-        [0.25, 0.25, 0.25, 1.0],
-    );
+    let neg =
+        px("ec.color.exposure", &[("master/offset", num(-0.5)), ("bypassLinearLight", Value::Bool(true)), ("master/gamma", num(2.0))], [0.25, 0.25, 0.25, 1.0]);
     assert!((neg[0] + 0.5).abs() < 1e-4, "{neg:?}");
 }
 
@@ -427,12 +420,8 @@ fn hue_saturation_ranges_adjust_their_hues_only() {
 
 #[test]
 fn fill_mask_all_masks_feather_and_invert() {
-    let sq = |x0: f64, x1: f64| crate::MaskShape {
-        name: String::new(),
-        points: vec![[x0, 0.0], [x1, 0.0], [x1, 10.0], [x0, 10.0]],
-        closed: true,
-        inverted: false,
-    };
+    let sq =
+        |x0: f64, x1: f64| crate::MaskShape { name: String::new(), points: vec![[x0, 0.0], [x1, 0.0], [x1, 10.0], [x0, 10.0]], closed: true, inverted: false };
     let masks = [sq(0.0, 5.0), sq(15.0, 20.0)];
     let env = EffectEnv { masks: &masks, ..Default::default() };
     let grey = Image::filled(20, 10, [0.5, 0.5, 0.5, 1.0]);

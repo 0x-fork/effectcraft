@@ -31,8 +31,8 @@ pub use foam::{FoamDisc, FoamEnv, FoamPlan, foam_full_plan};
 use pieces::Cam;
 #[cfg(test)]
 pub(crate) use pieces::draw_pieces;
-pub(crate) use pieces::{rot_axis, sort_far_first};
 pub use pieces::{Piece, PiecePlan, PieceTex, piece_plan};
+pub(crate) use pieces::{rot_axis, sort_far_first};
 pub use pixels::{PixelPlan, pixel_plan};
 pub use registry::specs;
 #[cfg(test)]

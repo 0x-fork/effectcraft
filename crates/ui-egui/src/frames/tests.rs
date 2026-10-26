@@ -832,8 +832,7 @@ fn the_frames_an_edit_keeps_match_a_fresh_render() {
     }
     let cam = id(s.execute("layer.newCamera", json!({"comp": comp.0})).unwrap(), "layer");
     s.execute("layer.timing", json!({"layers": [cam], "in": 2, "out": 3})).unwrap();
-    let moved =
-        kept(&mut s, comp, json!({"cmd": "prop.set", "params": {"comp": comp.0, "layer": cam, "path": "transform/position", "value": [40, 8, -30]}}));
+    let moved = kept(&mut s, comp, json!({"cmd": "prop.set", "params": {"comp": comp.0, "layer": cam, "path": "transform/position", "value": [40, 8, -30]}}));
     assert!(moved.contains(&0) && moved.contains(&100), "frames far from the camera stay: {moved:?}");
     assert!(!(56..=91).any(|f| moved.contains(&f)), "frames whose shutter samples the camera render again: {moved:?}");
 }

@@ -28,7 +28,8 @@ fn corrupt_future_or_unknown_workspace_keeps_defaults_and_original_file() {
     }
     let twice =
         r#"{"Split":{"vertical":true,"size":{"Ratio":0.5},"a":{"Tabs":{"panels":["Project"],"active":0}},"b":{"Tabs":{"panels":["Project"],"active":0}}}}"#;
-    let bad_split = r#"{"Split":{"vertical":true,"size":{"Ratio":7.0},"a":{"Tabs":{"panels":["Project"],"active":0}},"b":{"Tabs":{"panels":["Timeline"],"active":0}}}}"#;
+    let bad_split =
+        r#"{"Split":{"vertical":true,"size":{"Ratio":7.0},"a":{"Tabs":{"panels":["Project"],"active":0}},"b":{"Tabs":{"panels":["Timeline"],"active":0}}}}"#;
     for text in [
         "{".into(),
         "{}".into(),

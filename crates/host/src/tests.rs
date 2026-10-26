@@ -236,7 +236,11 @@ fn render_queue_exports_demo_comp() {
     let path = r["outputPath"].as_str().unwrap().to_string();
     assert!(path.ends_with("_240x134.mp4"), "{path}");
     // A second item: PNG sequence, rendered in the background.
-    s.execute("renderQueue.add", json!({"format": "png", "output": dir.join("seq_[###].png").to_string_lossy(), "resolution": 0.0625, "timeSpan": "custom", "start": 0.0, "end": 0.2})).unwrap();
+    s.execute(
+        "renderQueue.add",
+        json!({"format": "png", "output": dir.join("seq_[###].png").to_string_lossy(), "resolution": 0.0625, "timeSpan": "custom", "start": 0.0, "end": 0.2}),
+    )
+    .unwrap();
     let r = s.execute("renderQueue.render", json!({"wait": false})).unwrap();
     assert_eq!(r["items"].as_array().unwrap().len(), 2);
     let t0 = std::time::Instant::now();
@@ -265,8 +269,7 @@ fn value(s: &effectcraft_engine::Session, l: u64, path: &str) -> effectcraft_eng
     let cid = s.active_comp_id().unwrap();
     let comp = s.project.comp(cid).unwrap();
     let layer = comp.layer(effectcraft_engine::project::LayerId(l)).unwrap();
-    let ctx =
-        effectcraft_engine::render::EvalCtx { project: &s.project, comp_id: cid, comp, time: Default::default(), expr: s.expr.as_deref(), footage: None };
+    let ctx = effectcraft_engine::render::EvalCtx { project: &s.project, comp_id: cid, comp, time: Default::default(), expr: s.expr.as_deref(), footage: None };
     ctx.value(layer, layer.props.prop(path).unwrap())
 }
 
@@ -520,14 +523,8 @@ fn stereo_rig_expressions_follow_the_master_camera() {
     let v3 = |s: &effectcraft_engine::Session, path: &str| {
         let comp = s.project.comp(left).unwrap();
         let layer = &comp.layers[0];
-        let ctx = effectcraft_engine::render::EvalCtx {
-            project: &s.project,
-            comp_id: left,
-            comp,
-            time: Default::default(),
-            expr: s.expr.as_deref(),
-            footage: None,
-        };
+        let ctx =
+            effectcraft_engine::render::EvalCtx { project: &s.project, comp_id: left, comp, time: Default::default(), expr: s.expr.as_deref(), footage: None };
         ctx.value(layer, layer.props.prop(path).unwrap()).as_vec3()
     };
     let close = |a: [f64; 3], b: [f64; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-6);

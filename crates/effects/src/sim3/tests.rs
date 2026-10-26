@@ -123,8 +123,7 @@ fn property_mapper_and_layer_map_read_layers() {
         0.7,
     );
     assert_eq!(a.data, b.data);
-    let st =
-        Pg { persistent: Some(mapper(Image::filled(4, 4, [1.0, 0.0, 0.5, 1.0]), [(15, 0, 0.0, 120.0), (0, 0, 0.0, 1.0), (9, 0, 0.0, 2.0)])), ..bare(1) };
+    let st = Pg { persistent: Some(mapper(Image::filled(4, 4, [1.0, 0.0, 0.5, 1.0]), [(15, 0, 0.0, 120.0), (0, 0, 0.0, 1.0), (9, 0, 0.0, 2.0)])), ..bare(1) };
     let mut s = PgState::default();
     s.parts.push(PgParticle::new([1.0, 1.0], [0.0; 2], [1.0; 4], 2.0, 0, SRC_GRID));
     st.step(&mut s);
@@ -189,8 +188,7 @@ fn barrel_radius_square_or_disc() {
 
 #[test]
 fn mapper_drives_position_and_opacity_in_ae_order() {
-    let st =
-        Pg { persistent: Some(mapper(Image::filled(4, 4, [1.0, 0.5, 0.25, 1.0]), [(12, 0, 0.0, 30.0), (20, 0, 0.0, 1.0), (4, 0, 0.0, 1.0)])), ..bare(1) };
+    let st = Pg { persistent: Some(mapper(Image::filled(4, 4, [1.0, 0.5, 0.25, 1.0]), [(12, 0, 0.0, 30.0), (20, 0, 0.0, 1.0), (4, 0, 0.0, 1.0)])), ..bare(1) };
     assert_eq!(MAP_TARGETS[12], "X");
     assert_eq!(MAP_TARGETS[20], "Opacity");
     assert_eq!(MAP_TARGETS[26], "Scale Speed");

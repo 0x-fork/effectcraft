@@ -6,11 +6,8 @@ use effectcraft_time::{FrameRate, Tick};
 
 use crate::render_frame;
 
-mod auto;
-mod remap;
-mod roi;
-mod styles;
 mod audio_fx;
+mod auto;
 mod aux_channels;
 mod collapse;
 mod color;
@@ -22,6 +19,9 @@ mod mask_expansion;
 mod motion_tile;
 mod nested;
 mod paint;
+mod remap;
+mod roi;
+mod styles;
 mod time;
 
 fn setup() -> (Project, ItemId, Comp) {

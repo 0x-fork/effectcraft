@@ -26,7 +26,6 @@ use effectcraft_time::{FrameRate, Tick};
 
 use crate::Gpu;
 
-mod three_d;
 mod adjust;
 mod adv3d;
 mod deferred;
@@ -54,6 +53,7 @@ mod fx_warp;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod init;
 mod particles;
+mod three_d;
 mod wgsl_grammar;
 
 /// One GPU test at a time in this process: the calling test thread holds a process-wide lock

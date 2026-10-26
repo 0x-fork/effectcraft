@@ -1,8 +1,8 @@
 //! M13.12: transparency groups (isolated, knockout, group alpha) and soft masks on a group's
 //! combined result.
 
-use crate::*;
 use crate::tests::{page_pdf, render};
+use crate::*;
 
 fn near(a: [f32; 4], b: [f32; 4]) -> bool {
     (0..4).all(|i| (a[i] - b[i]).abs() < 0.02)

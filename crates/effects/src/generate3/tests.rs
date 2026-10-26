@@ -158,16 +158,10 @@ fn vegas_traces_contours() {
             img.set(x, y, [1.0, 1.0, 1.0, 1.0]);
         }
     }
-    let a = run(
-        "ec.generate.vegas",
-        &[("blendMode", Value::Enum(0)), ("length", num(1.0)), ("midpointOpacity", num(1.0)), ("endOpacity", num(1.0))],
-        img.clone(),
-    );
-    let b = run(
-        "ec.generate.vegas",
-        &[("blendMode", Value::Enum(0)), ("length", num(1.0)), ("midpointOpacity", num(1.0)), ("endOpacity", num(1.0))],
-        img.clone(),
-    );
+    let a =
+        run("ec.generate.vegas", &[("blendMode", Value::Enum(0)), ("length", num(1.0)), ("midpointOpacity", num(1.0)), ("endOpacity", num(1.0))], img.clone());
+    let b =
+        run("ec.generate.vegas", &[("blendMode", Value::Enum(0)), ("length", num(1.0)), ("midpointOpacity", num(1.0)), ("endOpacity", num(1.0))], img.clone());
     assert_eq!(a.img.data, b.img.data);
     assert!(alpha_sum(&a.img, 14, 14, 50, 50) > 50.0, "edges drawn");
     assert!(alpha_sum(&a.img, 26, 26, 38, 38) < 0.5, "interior untouched");

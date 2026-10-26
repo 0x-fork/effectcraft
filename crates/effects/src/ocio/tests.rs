@@ -229,13 +229,8 @@ fn profile_converter_converts_and_round_trips() {
         EffectEnv::default(),
     );
     assert_ne!(a.img.data, img.data);
-    let b = run_fx(
-        "ec.utility.colorprofileconverter",
-        &[("inputProfile", Value::Enum(3)), ("outputProfile", Value::Enum(1))],
-        a.img,
-        0.0,
-        EffectEnv::default(),
-    );
+    let b =
+        run_fx("ec.utility.colorprofileconverter", &[("inputProfile", Value::Enum(3)), ("outputProfile", Value::Enum(1))], a.img, 0.0, EffectEnv::default());
     assert!((0..3).all(|k| (b.img.get(0, 0)[k] - img.get(0, 0)[k]).abs() < 1e-4));
     // Same profile both sides: identity. Working space defaults to sRGB.
     let c = run_fx(

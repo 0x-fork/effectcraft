@@ -90,8 +90,7 @@ fn shatter_at_rest_then_breaks() {
     assert_eq!(t1, run("ec.sim.shatter", &v, src.clone(), 0.5));
     assert!(sum_diff(&t1, &src) > 10.0);
     for pat in 0..SHATTER_PATTERNS.len() as u32 {
-        let vv =
-            [("view", Value::Enum(0)), ("shape/pattern", Value::Enum(pat)), ("force1/force1Position", pt(16.0, 16.0)), ("shape/origin", pt(16.0, 16.0))];
+        let vv = [("view", Value::Enum(0)), ("shape/pattern", Value::Enum(pat)), ("force1/force1Position", pt(16.0, 16.0)), ("shape/origin", pt(16.0, 16.0))];
         let r = run("ec.sim.shatter", &vv, src.clone(), 0.0);
         assert!(max_diff(&r, &src) < 0.05, "pattern {pat} tiles the layer: {}", max_diff(&r, &src));
     }
@@ -186,8 +185,7 @@ fn wave_world_seek_and_waves() {
     assert!(a.data.iter().any(|p| (p[0] - 0.5).abs() > 0.05), "waves");
     let flat = run("ec.sim.waveworld", &[("view", Value::Enum(1)), ("producer1/producer1Amplitude", num(0.0))], Image::new(32, 32), 1.0);
     assert!(flat.data.iter().all(|p| (p[0] - 0.5).abs() < 1e-5));
-    let wire =
-        run("ec.sim.waveworld", &[("producer1/producer1Position", pt(16.0, 16.0)), ("simulation/gridResolution", num(10.0))], Image::new(32, 32), 0.3);
+    let wire = run("ec.sim.waveworld", &[("producer1/producer1Position", pt(16.0, 16.0)), ("simulation/gridResolution", num(10.0))], Image::new(32, 32), 0.3);
     assert!(wire.data.iter().any(|p| p[1] > 0.3));
 }
 
@@ -460,8 +458,7 @@ fn foam_flow_map_pop_velocity_wobble_textures_and_reflection() {
     let still = with(&[], 1.0);
     let flowing = with(&[("flowMap/flowMap", Value::Layer(Some(1))), ("flowMap/flowMapSteepness", num(1.0))], 1.0);
     assert!(cx(&flowing) < cx(&still) - 1.0, "{} vs {}", cx(&flowing), cx(&still));
-    let hq =
-        with(&[("flowMap/flowMap", Value::Layer(Some(1))), ("flowMap/flowMapSteepness", num(1.0)), ("flowMap/simulationQuality", Value::Enum(2))], 1.0);
+    let hq = with(&[("flowMap/flowMap", Value::Layer(Some(1))), ("flowMap/flowMapSteepness", num(1.0)), ("flowMap/simulationQuality", Value::Enum(2))], 1.0);
     assert_eq!(
         hq,
         with(&[("flowMap/flowMap", Value::Layer(Some(1))), ("flowMap/flowMapSteepness", num(1.0)), ("flowMap/simulationQuality", Value::Enum(2))], 1.0)

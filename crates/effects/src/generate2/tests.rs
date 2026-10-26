@@ -116,9 +116,8 @@ fn lightning_alpha_obstacle_and_expert_settings() {
             }
         }
     }
-    let opts = |o: f64| {
-        vec![("alphaObstacle", num(o)), ("compositeOnOriginal", Value::Bool(false)), ("glowSettings/glowRadius", num(0.0)), ("forking", num(60.0))]
-    };
+    let opts =
+        |o: f64| vec![("alphaObstacle", num(o)), ("compositeOnOriginal", Value::Bool(false)), ("glowSettings/glowRadius", num(0.0)), ("forking", num(60.0))];
     let free = run("ec.generate.advancedlightning", &opts(0.0), wall.clone());
     let avoid = run("ec.generate.advancedlightning", &opts(10.0), wall.clone());
     assert!(alpha_in(&avoid.img, &wall) < alpha_in(&free.img, &wall), "{} vs {}", alpha_in(&avoid.img, &wall), alpha_in(&free.img, &wall));

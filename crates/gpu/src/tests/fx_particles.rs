@@ -7,8 +7,8 @@ use effectcraft_project::{BitDepth, LayerSource, build};
 use effectcraft_render::RenderOpts;
 use effectcraft_time::Tick;
 
-use crate::tests::{Scene, check, compare_at, n, opts, set};
 use crate::tests::fx_sim::{case, composited, e, off, on};
+use crate::tests::{Scene, check, compare_at, n, opts, set};
 
 fn v2(x: f64, y: f64) -> Value {
     Value::Vec2([x, y])

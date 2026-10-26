@@ -36,13 +36,8 @@ impl Scrub {
 
     fn frame(&mut self, events: Vec<Event>, focused: bool) {
         self.time += 0.02;
-        let mut raw = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
-            time: Some(self.time),
-            events,
-            focused,
-            ..Default::default()
-        };
+        let mut raw =
+            RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), time: Some(self.time), events, focused, ..Default::default() };
         raw.events.push(Event::ModifiersChanged(self.modifiers));
         prepare_input(&self.ctx, &mut raw, self.injected);
         let mut out = self.ctx.run_ui(raw, |ui| {
