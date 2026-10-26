@@ -5488,7 +5488,7 @@ mod tests {
         // and Fast Previews lists come from the engine as data, so their source strings live here.
         ("engine settings pages", include_str!("../../../engine/src/prefs.rs")),
         ("engine viewer channels", include_str!("../../../engine/src/viewer.rs")),
-        ("engine viewer commands", include_str!("../../../engine/src/commands/viewer_cmds.rs")),
+        ("engine viewer commands", include_str!("../../../engine/src/cmd/viewer_cmds.rs")),
     ];
 
     fn catalogs() -> Vec<(&'static str, &'static str)> {

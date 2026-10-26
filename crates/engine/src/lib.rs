@@ -12,7 +12,7 @@
 
 pub mod autosave;
 pub mod camera_track;
-pub mod commands;
+pub mod cmd;
 pub mod config;
 pub mod demo;
 pub mod doc_path;
@@ -59,7 +59,8 @@ use effectcraft_time::Tick;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub use commands::{CommandSpec, command_specs, find as find_command};
+pub use cmd as commands;
+pub use cmd::{CommandSpec, command_specs, find as find_command};
 pub use effectcraft_color as color;
 pub use effectcraft_effects as effects;
 pub use effectcraft_geom as geom;
