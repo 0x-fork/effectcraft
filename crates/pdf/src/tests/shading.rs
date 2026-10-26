@@ -1,6 +1,6 @@
 //! M13.12: function-based and mesh shadings (generated fixtures).
 
-use super::*;
+use crate::*;
 use crate::tests::{Objs, page_pdf, render};
 
 /// Mesh vertex data: 8-bit flags, 16-bit coordinates (Decode `[0 65535 0 65535 …]`, so raw

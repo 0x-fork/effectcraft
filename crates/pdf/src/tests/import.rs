@@ -1,7 +1,7 @@
 //! M13.12: CCITT images in PDF pages, EPS text and parser robustness over truncated and
 //! corrupt inputs (generated fixtures).
 
-use super::*;
+use crate::*;
 use crate::tests::{coverage, page_pdf, render, shape_names};
 
 fn eps(body: &[u8]) -> Doc {

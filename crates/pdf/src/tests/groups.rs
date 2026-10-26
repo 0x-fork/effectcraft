@@ -1,7 +1,7 @@
 //! M13.12: transparency groups (isolated, knockout, group alpha) and soft masks on a group's
 //! combined result.
 
-use super::*;
+use crate::*;
 use crate::tests::{page_pdf, render};
 
 fn near(a: [f32; 4], b: [f32; 4]) -> bool {
