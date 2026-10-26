@@ -14,19 +14,15 @@ mod analysis;
 mod background;
 pub mod cmd;
 mod footage;
-pub mod guard;
 pub mod history;
 mod home;
 mod interchange;
-pub mod logging;
 pub mod menus;
-pub mod perf;
 pub mod preview;
 pub mod render_queue;
 pub mod scriptui;
 mod settings;
-pub mod storage;
-pub mod sysinfo;
+mod system;
 pub mod viewer;
 
 use std::sync::Arc;
@@ -79,6 +75,11 @@ pub use settings::autosave;
 pub use settings::config;
 pub use settings::prefs;
 pub use settings::shortcuts;
+pub use system::guard;
+pub use system::logging;
+pub use system::perf;
+pub use system::storage;
+pub use system::sysinfo;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
