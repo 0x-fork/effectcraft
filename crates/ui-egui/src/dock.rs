@@ -528,9 +528,9 @@ pub enum DocAction {
 }
 
 /// Room around a tab's label, as craft-ui gives its dock tabs.
-pub const TAB_PADDING: f32 = 24.0;
+const TAB_PADDING: f32 = 24.0;
 /// Width of the » button that lists the comp tabs with no room in the strip.
-pub const DOC_OVERFLOW: f32 = 22.0;
+const DOC_OVERFLOW: f32 = 22.0;
 /// Room for the × after the shown comp's name.
 const DOC_CLOSE: f32 = 16.0;
 
@@ -543,7 +543,7 @@ fn doc_job(doc: &DocTab, font: &egui::FontId, color: egui::Color32) -> egui::tex
 }
 
 /// The width of one line of `job` at the fonts' current size.
-pub fn text_width(ctx: &egui::Context, job: egui::text::LayoutJob) -> f32 {
+fn text_width(ctx: &egui::Context, job: egui::text::LayoutJob) -> f32 {
     ctx.fonts_mut(|f| f.layout_job(job)).size().x
 }
 
