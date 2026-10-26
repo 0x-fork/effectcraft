@@ -8,7 +8,7 @@ use effectcraft_keyframe::Value;
 use effectcraft_time::Tick;
 
 use crate::tests::{c, n};
-use crate::tests_fx_pixel2::{e, env_case, env_case_allow, env_case_at, off, on, pt};
+use crate::tests::fx_pixel2::{e, env_case, env_case_allow, env_case_at, off, on, pt};
 
 fn layer(id: u64) -> Value {
     Value::Layer(Some(id))

@@ -9,9 +9,9 @@ use effectcraft_render::{Accelerator, Backend, LayerCache, NoFootage, RenderOpts
 use effectcraft_time::Tick;
 
 use crate::tests::{Pattern, diff, n, tolerance};
-use crate::tests_adv3d::{off_share, run_of, scene, scene_project};
-use crate::tests_deferred::{deferred_gpu, render_passes};
-use crate::tests_particles::{Host, agree, params};
+use crate::tests::adv3d::{off_share, run_of, scene, scene_project};
+use crate::tests::deferred::{deferred_gpu, render_passes};
+use crate::tests::particles::{Host, agree, params};
 
 /// The device's readbacks have landed (the browser's event loop; natively a poll).
 fn settle(g: &crate::Gpu) {
@@ -87,7 +87,7 @@ fn advanced_3d_resolves_in_passes() {
 #[test]
 fn job_frames_render_in_passes() {
     let Some((g, _lock)) = deferred_gpu() else { return };
-    let s = crate::tests_deferred::scene();
+    let s = crate::tests::deferred::scene();
     let t = Tick::from_seconds_f64(0.5);
     let cache = LayerCache::default();
     cache.set_gate(g.miss_gate());
