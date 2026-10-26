@@ -2,9 +2,9 @@
 //! the limit, a NaN text transform), a damaged layer section, and a tiny file claiming a huge
 //! image. Each ends in a clean result or a clean error, on a 2 MiB stack, never a panic.
 
-use super::memory_tests::with_merged;
-use super::write::*;
-use super::*;
+use crate::memory_tests::with_merged;
+use crate::write::*;
+use crate::*;
 
 /// Run `f` on a 2 MiB thread; a panic or stack overflow in it fails the test.
 fn on_small_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {

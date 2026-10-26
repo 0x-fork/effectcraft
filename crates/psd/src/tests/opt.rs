@@ -1,10 +1,10 @@
 //! The optimised decode / mask / placed-bake paths against the implementations they replaced
 //! (kept below verbatim as references), and counters for the work they no longer do.
 
-use super::counters::{self, INSIDE, QUAD, SCRATCH};
-use super::placed::{Warp, square_to_quad};
-use super::write::*;
-use super::*;
+use crate::counters::{self, INSIDE, QUAD, SCRATCH};
+use crate::placed::{Warp, square_to_quad};
+use crate::write::*;
+use crate::*;
 
 // ------------------------------------------------------------------ the replaced code
 

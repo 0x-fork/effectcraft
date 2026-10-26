@@ -1493,10 +1493,6 @@ fn lab_to_rgb(l: f32, a: f32, b: f32) -> [f32; 3] {
 mod memory_tests;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod tests_integration;
-#[cfg(test)]
-mod tests_opt;
 
 /// Test-only call counters (per thread), to prove what the optimised paths avoid doing.
 #[cfg(test)]
