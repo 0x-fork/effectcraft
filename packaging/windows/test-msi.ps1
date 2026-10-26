@@ -36,7 +36,9 @@ function Invoke-Native([string] $What, [scriptblock] $Block) {
 }
 function Invoke-Msiexec([string] $What, [string[]] $Arguments) {
   $log = Join-Path $Work "$($What -replace '\W', '-').log"
-  $p = Start-Process msiexec.exe -ArgumentList ($Arguments + '/qn', '/l*v', "`"$log`"") -Wait -PassThru
+  # This existing VM regression deliberately covers the all-users upgrade route.
+  $p = Start-Process msiexec.exe -ArgumentList ($Arguments + 'ALLUSERS=1', '/qn', '/norestart', '/l*v', "`"$log`"") -PassThru
+  if (-not $p.WaitForExit(300000)) { $p.Kill(); throw "msiexec ($What) exceeded five minutes; see $log" }
   if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60; throw "msiexec ($What) exited $($p.ExitCode)" }
   Write-Output "ok $What"
 }
@@ -65,8 +67,9 @@ New-Item -ItemType Directory -Force -Path $Bin | Out-Null
 # The MSI only copies these. The app is versioned (it embeds VERSIONINFO); the real CLI has no
 # version resource, so its stand-in is an unversioned file too: Windows Installer keeps a changed
 # unversioned file on repair unless the repair mode forces it.
-Copy-Item (Join-Path $env:SystemRoot 'System32\notepad.exe') (Join-Path $Bin 'effectcraft.exe')
+Copy-Item (Join-Path $env:SystemRoot 'System32\cmd.exe') (Join-Path $Bin 'effectcraft.exe')
 [IO.File]::WriteAllText((Join-Path $Bin 'effectcraft-cli.exe'), 'effectcraft-cli stand-in')
+[IO.File]::WriteAllText((Join-Path $Bin 'NOTICE'), 'Test fixture notice')
 
 # 0.0.1 stands in for releases before this installer change: the same package without the App
 # Paths "Path" value.
@@ -76,6 +79,8 @@ $pathValue = '(?m)^.*<RegistryValue [^>]*Name="Path"[^>]*/>\r?\n'
 $text = Get-Content -Raw $Wxs
 if ($text -notmatch $pathValue) { throw "no App Paths Path value in $Wxs to leave out" }
 [IO.File]::WriteAllText($LegacyWxs, ($text -replace $pathValue, ''))
+# The legacy source lives in the scratch folder, so its local include must travel with it.
+Copy-Item (Join-Path $PSScriptRoot 'install-policy.wxi') (Join-Path $Work 'install-policy.wxi')
 
 $Msi = @{}
 foreach ($v in '0.0.1', '0.0.2', '0.0.3') {
@@ -90,7 +95,7 @@ foreach ($v in '0.0.1', '0.0.2', '0.0.3') {
 
 # Spaces and a non-ASCII letter (written as a char so the script's own encoding doesn't matter).
 $Custom = Join-Path $env:SystemDrive "EffectCraft Test $([char]0x00DC)nicode\My Apps"
-$Default = Join-Path $env:ProgramFiles 'EffectCraft'
+$Default = Join-Path $env:ProgramFiles 'ArtCraft\EffectCraft'
 if (Test-Path -LiteralPath $AppPaths) { throw 'EffectCraft is already installed here; run this on a clean machine' }
 
 Invoke-Msiexec 'install the legacy package to a custom folder' @('/i', "`"$($Msi['0.0.1'])`"", "INSTALLFOLDER=`"$Custom`"")

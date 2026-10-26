@@ -1,16 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  EffectCraft installer wizard: original dialogs built from Windows Installer's own controls and
-  events (no WixUI library), included by effectcraft.wxs with <UIRef Id="EffectcraftUI" />.
-
-    fresh install:  DestDlg (folder, Change... opens BrowseDlg, desktop shortcut) -> ReadyDlg -> ProgressDlg -> ExitDlg
-    upgrade:        ReadyDlg (the installed copy's folder, not editable) -> ProgressDlg -> ExitDlg
-    already there:  MaintDlg (Repair or Remove) -> ProgressDlg -> ExitDlg
-
-  Silent installs (/qn) skip all of this; pass INSTALLFOLDER="..." to choose the folder there.
-  Folder controls edit INSTALLFOLDER indirectly through _BrowseProperty; SetTargetPath checks the
-  path and applies it, and Windows Installer reports a bad path itself.
--->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
     <UI Id="EffectcraftUI">
