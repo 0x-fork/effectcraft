@@ -166,7 +166,7 @@ pub(crate) fn median_image(e: &mut Enc, img: &GpuImage, r: usize, straight: bool
     // sliding along the rest.
     let seg = (4 * r as u32).clamp(32, 512).min(q.width);
     let out = e.scratch(q.width, q.height);
-    e.dispatch("fxn_median_huang", &with_u0([r as u32, seg, 0, 0]), &q, None, &out, Some(&levels), (q.height.div_ceil(64), q.width.div_ceil(seg)));
+    e.dispatch("fxn_median_huang", &with_u0([r as u32, seg, 0, 0]), &q, None, &out, Some(&levels), (q.height, q.width.div_ceil(seg)));
     out
 }
 
