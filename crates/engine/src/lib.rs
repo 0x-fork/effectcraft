@@ -11,19 +11,17 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod analysis;
+mod background;
 pub mod cmd;
 mod footage;
 pub mod guard;
 pub mod history;
 mod home;
 mod interchange;
-pub mod jobs;
 pub mod logging;
 pub mod menus;
-pub mod offload;
 pub mod perf;
 pub mod preview;
-pub mod remote;
 pub mod render_queue;
 pub mod scriptui;
 mod settings;
@@ -46,6 +44,9 @@ pub use analysis::models;
 pub use analysis::roto;
 pub use analysis::tracking;
 pub use analysis::warp;
+pub use background::jobs;
+pub use background::offload;
+pub use background::remote;
 pub use cmd as commands;
 pub use cmd::{CommandSpec, command_specs, find as find_command};
 pub use effectcraft_color as color;

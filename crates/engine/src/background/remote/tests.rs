@@ -305,16 +305,8 @@ fn deferred_readbacks_render_in_passes() {
     assert!(matches!(out[0].0, FrameReply::Frame { id: 3, passes: 1, gpu: false, .. }));
     for id in 4..12 {
         let auto = RenderOpts { backend: Backend::Auto, ..opts };
-        let mut out = w.handle(round(&FrameMsg::Render {
-            id,
-            revision: s.revision,
-            comp,
-            time: t,
-            opts: Box::new(auto),
-            disk: None,
-            layers: false,
-            prefetch: vec![],
-        }));
+        let mut out =
+            w.handle(round(&FrameMsg::Render { id, revision: s.revision, comp, time: t, opts: Box::new(auto), disk: None, layers: false, prefetch: vec![] }));
         while w.waiting() {
             acc.settle();
             out = w.resume();
