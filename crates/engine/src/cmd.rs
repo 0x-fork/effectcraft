@@ -156,6 +156,7 @@ mod enabled;
 mod params;
 mod schema;
 
+use super::*;
 pub use enabled::always;
 pub(crate) use enabled::{has_comp, has_keys, has_layers, has_project_selection, not_yet, not_yet_run};
 pub use params::match_path_of;
@@ -279,4 +280,15 @@ pub fn find(id: &str) -> Option<&'static CommandSpec> {
         m
     });
     index.get(id).map(|&i| &command_specs()[i])
+}
+
+/// Font families available to text layers (bundled + scanned system fonts).
+/// Text animation presets: (id, name), for menus.
+pub fn text_presets() -> Vec<(String, String)> {
+    commands::text_preset_list()
+}
+
+/// Built-in animation presets (Effects & Presets ▸ * Animation Presets): (id, name, category).
+pub fn animation_presets() -> Vec<(String, String, String)> {
+    commands::builtin_preset_list()
 }
