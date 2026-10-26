@@ -5486,7 +5486,8 @@ mod tests {
         ("panels/viewers.rs", include_str!("../panels/viewers.rs")),
         // Text the interface draws but does not own: the settings pages and the viewer's channel
         // and Fast Previews lists come from the engine as data, so their source strings live here.
-        ("engine settings pages", include_str!("../../../engine/src/settings/prefs.rs")),
+        ("engine settings pages", include_str!("../../../engine/src/settings/prefs/dialog.rs")),
+        ("engine settings choices", include_str!("../../../engine/src/settings/prefs/choices.rs")),
         ("engine viewer channels", include_str!("../../../engine/src/viewer.rs")),
         ("engine viewer commands", include_str!("../../../engine/src/cmd/viewer_cmds.rs")),
     ];
