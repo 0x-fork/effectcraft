@@ -605,7 +605,7 @@ mod tests {
         assert_ne!(state_key(&app), k0);
         // A tab behind another one, a closed panel and panels under a maximized one are not shown.
         assert_eq!((checked(&app, "renderQueue"), checked(&app, "timeline")), (Some(true), Some(false)));
-        app.ui.dock.close(PanelKind::RenderQueue);
+        app.close_panel(PanelKind::RenderQueue);
         assert_eq!((checked(&app, "renderQueue"), checked(&app, "timeline")), (Some(false), Some(true)));
         app.ui.maximized = Some(PanelKind::Timeline);
         assert_eq!((checked(&app, "timeline"), checked(&app, "project")), (Some(true), Some(false)));
@@ -648,9 +648,9 @@ mod tests {
             activate(app, &ctx, &spec, &id).unwrap();
         };
         choose(&mut app);
-        assert!(app.ui.dock.contains(PanelKind::Align));
+        assert!(crate::dock::WorkspaceExt::is_open(&app.ui.dock, PanelKind::Align));
         choose(&mut app);
-        assert!(!app.ui.dock.contains(PanelKind::Align));
+        assert!(!crate::dock::WorkspaceExt::is_open(&app.ui.dock, PanelKind::Align));
     }
 
     #[test]
