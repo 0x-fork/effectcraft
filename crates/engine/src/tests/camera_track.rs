@@ -11,7 +11,7 @@ use effectcraft_track::camtrack::linalg::{self, M3, V3};
 use serde_json::{Value, json};
 
 use crate::Session;
-use crate::tests_track::{H, W, frame_time, setup, texture};
+use crate::tests::track::{H, W, frame_time, setup, texture};
 
 const F: f64 = 260.0;
 

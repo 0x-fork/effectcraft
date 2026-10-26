@@ -6,7 +6,7 @@ use effectcraft_track::face::{FaceParams, LANDMARKS, MEASUREMENTS, render_synthe
 use serde_json::json;
 
 use crate::mask_track::MaskMethod;
-use crate::tests_track::{H, W, frame_time, setup};
+use crate::tests::track::{H, W, frame_time, setup};
 
 fn face(f: u32) -> FaceParams {
     let t = f as f64;

@@ -11,7 +11,7 @@ use effectcraft_track::Homography;
 use serde_json::json;
 
 use crate::Session;
-use crate::tests_track::{FPS, H, W, frame_time, patch_frames, rotating_pose, setup, texture};
+use crate::tests::track::{FPS, H, W, frame_time, patch_frames, rotating_pose, setup, texture};
 
 fn pose_h(f: u32) -> Homography {
     let (c, rot, sc) = rotating_pose(f);

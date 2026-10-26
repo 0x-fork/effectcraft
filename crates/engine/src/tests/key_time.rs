@@ -4,7 +4,7 @@ use effectcraft_project::LayerId;
 use effectcraft_time::Tick;
 use serde_json::{Value, json};
 
-use crate::{Session, tests_timeline::prop};
+use crate::{Session, tests::timeline::prop};
 
 fn offset_layer(start: f64, stretch: f64) -> (Session, u64) {
     let mut s = Session::default();

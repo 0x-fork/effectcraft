@@ -120,7 +120,7 @@ impl Session {
         // opens a disk cache (often the platform folder, through a settings store) would take
         // over the store of a roto test running beside it. Serialise them with the roto tests.
         #[cfg(test)]
-        crate::tests_roto::hold_roto_cache_test_lock();
+        crate::tests::roto::hold_roto_cache_test_lock();
         let dc = match &self.disk_cache {
             Some(c) if c.folder() == folder.as_path() => {
                 c.set_max_bytes(max);

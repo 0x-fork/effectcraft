@@ -8,7 +8,7 @@ use effectcraft_track::roto::rle;
 use serde_json::{Value, json};
 
 use crate::Session;
-use crate::tests_track::{H, W, frame_time, setup};
+use crate::tests::track::{H, W, frame_time, setup};
 
 /// Keep cache/model mutation tests from clearing segmentations under another fixture.
 /// Libtest runs each test on its own thread; the guard lives until that thread exits.

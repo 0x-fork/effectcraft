@@ -181,7 +181,7 @@ fn every_schema_key_exists_and_docs_list_the_todo_settings() {
             assert!(ids.contains(&page), "{path:?} opens unknown page {page}");
         }
     }
-    let docs = include_str!("../../../docs/preferences.md");
+    let docs = include_str!("../../../../docs/preferences.md");
     for k in crate::prefs::todo_keys() {
         assert!(docs.contains(&format!("`{k}`")), "docs/preferences.md must list the not-yet-wired setting `{k}`");
     }

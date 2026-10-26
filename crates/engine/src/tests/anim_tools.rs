@@ -3,7 +3,7 @@
 use effectcraft_keyframe::evaluate;
 use serde_json::json;
 
-use crate::tests_timeline::{animate, prop, setup};
+use crate::tests::timeline::{animate, prop, setup};
 
 fn select(s: &mut crate::Session, layer: u64, path: &str) {
     s.execute("prop.select", json!({"layer": layer, "path": path})).unwrap();

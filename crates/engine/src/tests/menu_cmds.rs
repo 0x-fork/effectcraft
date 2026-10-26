@@ -641,7 +641,7 @@ fn work_area_stays_ordered_when_the_start_passes_the_end() {
 
 #[test]
 fn label_group_purge_and_edit_original() {
-    crate::tests_roto::hold_roto_cache_test_lock();
+    crate::tests::roto::hold_roto_cache_test_lock();
     let mut s = comp();
     let a = solid(&mut s, "#ff0000");
     let b = solid(&mut s, "#00ff00");

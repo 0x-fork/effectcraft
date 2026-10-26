@@ -3,7 +3,7 @@
 
 use serde_json::json;
 
-use crate::tests_timeline::setup;
+use crate::tests::timeline::setup;
 
 #[test]
 fn comp_marker_dialog_fields_and_undo() {

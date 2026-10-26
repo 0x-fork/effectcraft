@@ -345,7 +345,7 @@ fn render_queue_uses_default_folder_bit_depth_names_and_segments() {
 fn every_wired_setting_is_live_and_display_only_ones_are_documented() {
     let todo = crate::prefs::todo_keys();
     assert_eq!(todo, ["general.useSystemColorPicker", "composition.hardwareAcceleratePanels", "scripting.enableJsDebugger"]);
-    let docs = include_str!("../../../docs/preferences.md");
+    let docs = include_str!("../../../../docs/preferences.md");
     assert!(docs.contains("### Display-only settings"));
     assert!(!docs.contains("Not wired yet"));
 }

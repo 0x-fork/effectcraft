@@ -198,7 +198,7 @@ fn cached_text_presets_keep_the_catalog_and_application_independent() {
 #[ignore = "warm text-preset listing benchmark"]
 fn text_preset_listing_benchmark() {
     let old = || {
-        let v: serde_json::Value = serde_json::from_str(include_str!("../presets/text_animators.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(include_str!("../../presets/text_animators.json")).unwrap();
         let presets = v["presets"].as_array().unwrap().clone();
         presets.iter().map(|p| (p["id"].as_str().unwrap().to_string(), p["name"].as_str().unwrap().to_string())).collect::<Vec<_>>()
     };

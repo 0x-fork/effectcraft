@@ -1385,98 +1385,6 @@ pub fn upgrade_effects(p: &mut Project) {
 mod rq_tests;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod tests_3d;
-#[cfg(test)]
-mod tests_anim_presets;
-#[cfg(test)]
-mod tests_anim_tools;
-#[cfg(test)]
-mod tests_camera_track;
-#[cfg(test)]
-mod tests_codec_options;
-#[cfg(test)]
-mod tests_color_view;
-#[cfg(test)]
-mod tests_crypto_pick;
-#[cfg(test)]
-mod tests_delete_keys;
-#[cfg(test)]
-mod tests_disk_cache;
-#[cfg(test)]
-mod tests_effects;
-#[cfg(test)]
-mod tests_essential;
-#[cfg(test)]
-mod tests_essential_more;
-#[cfg(test)]
-mod tests_face;
-#[cfg(test)]
-mod tests_fidelity;
-#[cfg(test)]
-mod tests_frame_export;
-#[cfg(test)]
-mod tests_fuzz_open;
-#[cfg(test)]
-mod tests_import_project;
-#[cfg(test)]
-mod tests_key_metadata_order;
-#[cfg(test)]
-mod tests_keylight;
-#[cfg(test)]
-mod tests_limits;
-#[cfg(test)]
-mod tests_lottie;
-#[cfg(test)]
-mod tests_m137;
-#[cfg(test)]
-mod tests_m145;
-#[cfg(test)]
-mod tests_markers;
-#[cfg(test)]
-mod tests_mask_warp;
-#[cfg(test)]
-mod tests_menu_cmds;
-#[cfg(test)]
-mod tests_model3d;
-#[cfg(test)]
-mod tests_motion_blur_depth;
-#[cfg(test)]
-mod tests_project_items;
-#[cfg(test)]
-mod tests_proxy;
-#[cfg(test)]
-mod tests_quick_offset;
-#[cfg(test)]
-mod tests_replace_source;
-#[cfg(test)]
-mod tests_rig3d;
-#[cfg(test)]
-mod tests_sequence;
-#[cfg(test)]
-mod tests_settings;
-#[cfg(test)]
-mod tests_shortcut_cmds;
-#[cfg(test)]
-mod tests_stubs;
-#[cfg(test)]
-mod tests_styles;
-#[cfg(test)]
-mod tests_tail;
-#[cfg(test)]
-mod tests_text;
-#[cfg(test)]
-mod tests_text_edit;
-#[cfg(test)]
-mod tests_timeline;
-#[cfg(test)]
-mod tests_timeline_interchange;
-#[cfg(test)]
-mod tests_track;
-#[cfg(test)]
-mod tests_vector_import;
-#[cfg(test)]
-mod tests_viewer;
 
 /// Font families available to text layers (bundled + scanned system fonts).
 /// Text animation presets: (id, name), for menus.
@@ -1579,16 +1487,4 @@ pub fn font_menu(prefs: &prefs::Prefs) -> Vec<FontRow> {
     out.extend(all.iter().map(|f| row(f, false)));
     out
 }
-#[cfg(test)]
-mod tests_history;
-#[cfg(test)]
-mod tests_models;
-#[cfg(test)]
-mod tests_paint;
-#[cfg(test)]
-mod tests_panels;
-#[cfg(test)]
-mod tests_roto;
 
-#[cfg(test)]
-mod tests_key_time;
