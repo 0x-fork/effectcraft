@@ -12,14 +12,12 @@
 
 mod analysis;
 pub mod cmd;
-pub mod demo;
 mod footage;
 pub mod guard;
 pub mod history;
+mod home;
 mod interchange;
 pub mod jobs;
-pub mod learn;
-pub mod links;
 pub mod logging;
 pub mod menus;
 pub mod offload;
@@ -31,7 +29,6 @@ pub mod scriptui;
 mod settings;
 pub mod storage;
 pub mod sysinfo;
-pub mod templates;
 pub mod viewer;
 
 use std::sync::Arc;
@@ -69,6 +66,10 @@ pub use footage::media_browser;
 pub use footage::media_cache;
 pub use footage::sequence;
 pub use history::{Branch, History, HistoryNode};
+pub use home::demo;
+pub use home::learn;
+pub use home::links;
+pub use home::templates;
 pub use interchange::psd_import;
 pub use interchange::vector;
 pub use interchange::xml_project;
