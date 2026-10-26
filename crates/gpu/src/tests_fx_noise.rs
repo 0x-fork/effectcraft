@@ -23,6 +23,24 @@ fn pt(x: f64, y: f64) -> Value {
 }
 
 #[test]
+fn median_kernel_selection_preserves_physical_gpu_path() {
+    use crate::fx_noise::MedianKernel;
+    for backend in [wgpu::Backend::Vulkan, wgpu::Backend::Metal, wgpu::Backend::Dx12, wgpu::Backend::Gl, wgpu::Backend::BrowserWebGpu] {
+        for device_type in
+            [wgpu::DeviceType::DiscreteGpu, wgpu::DeviceType::IntegratedGpu, wgpu::DeviceType::VirtualGpu, wgpu::DeviceType::Cpu, wgpu::DeviceType::Other]
+        {
+            let selected = MedianKernel::for_adapter(backend, device_type);
+            let expected =
+                if backend == wgpu::Backend::Vulkan && device_type == wgpu::DeviceType::Cpu { MedianKernel::Software2 } else { MedianKernel::Private64 };
+            assert_eq!(selected, expected, "{backend:?} {device_type:?}");
+        }
+    }
+    assert_eq!(MedianKernel::Private64.rows_per_workgroup(), 64);
+    assert_eq!(MedianKernel::Software2.rows_per_workgroup(), 2);
+    assert_eq!(MedianKernel::Software2.workgroup_storage(), 16_384);
+}
+
+#[test]
 fn medians() {
     effect_case("ec.noise.median", &[("radius", n(2.0))]);
     effect_case("ec.noise.median", &[("radius", n(5.0)), ("operateOnAlpha", on())]);
