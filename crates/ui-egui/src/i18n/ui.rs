@@ -5491,6 +5491,12 @@ mod tests {
         ("panels/tracker.rs", include_str!("../panels/tracker.rs")),
         ("panels/unsaved.rs", include_str!("../panels/unsaved.rs")),
         ("panels/viewer.rs", include_str!("../panels/viewer.rs")),
+        ("panels/viewer/frame.rs", include_str!("../panels/viewer/frame.rs")),
+        ("panels/viewer/geometry.rs", include_str!("../panels/viewer/geometry.rs")),
+        ("panels/viewer/gesture.rs", include_str!("../panels/viewer/gesture.rs")),
+        ("panels/viewer/shapes.rs", include_str!("../panels/viewer/shapes.rs")),
+        ("panels/viewer/tools.rs", include_str!("../panels/viewer/tools.rs")),
+        ("panels/viewer/view.rs", include_str!("../panels/viewer/view.rs")),
         ("panels/viewer_tools.rs", include_str!("../panels/viewer_tools.rs")),
         ("panels/viewers.rs", include_str!("../panels/viewers.rs")),
         // Text the interface draws but does not own: the settings pages and the viewer's channel
