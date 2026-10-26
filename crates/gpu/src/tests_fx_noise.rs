@@ -237,8 +237,17 @@ fn median_levels_match_cpu_division() {
         // A monotone row's median is its centre, including repeated edges. Exercise both
         // the bisection and sliding-histogram kernels at every quantised level.
         let mut enc = crate::context::Enc::new(&g.ctx);
+        let started = std::time::Instant::now();
         let median = crate::fx_noise::median_image(&mut enc, &input, radius, false);
-        let actual = enc.download(&median).unwrap();
+        let actual = enc.download(&median).unwrap_or_else(|| {
+            panic!(
+                "median download radius {radius}; elapsed={:?}, health={:?}, unavailable={:?}, transfers={:?}",
+                started.elapsed(),
+                g.ctx.check_health(),
+                g.ctx.unavailable_kernels(),
+                g.ctx.transfer_stats()
+            )
+        });
         for (level, (want, got)) in image.data.iter().zip(&actual.data).enumerate() {
             assert_eq!(got, want, "radius {radius}, level {level}");
         }
@@ -273,7 +282,16 @@ fn dust_strict_threshold_boundaries() {
             let buf = effectcraft_effects::Buf { img, offset: [0.0; 2], scale: 1.0 };
             let cpu = (spec.render)(&ctx(), buf.clone());
             assert_eq!(cpu.img.data[24] != original, replaced, "CPU radius {radius}, threshold {threshold}");
-            let gpu = effectcraft_render::Accelerator::effects(g, &[effectcraft_render::FxStep { spec, ctx: ctx() }], &buf, None).unwrap();
+            let started = std::time::Instant::now();
+            let gpu = effectcraft_render::Accelerator::effects(g, &[effectcraft_render::FxStep { spec, ctx: ctx() }], &buf, None).unwrap_or_else(|| {
+                panic!(
+                    "dust radius {radius}, threshold {threshold}; elapsed={:?}, health={:?}, unavailable={:?}, transfers={:?}",
+                    started.elapsed(),
+                    g.ctx.check_health(),
+                    g.ctx.unavailable_kernels(),
+                    g.ctx.transfer_stats()
+                )
+            });
             assert_eq!(gpu.img.data[24], cpu.img.data[24], "radius {radius}, threshold {threshold}");
         }
     }
