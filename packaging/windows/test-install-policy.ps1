@@ -12,6 +12,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $policy = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'install-policy.json') | ConvertFrom-Json
 [void](New-Item -ItemType Directory -Force -Path $OutputDirectory)
 $output = (Resolve-Path -LiteralPath $OutputDirectory).Path
+& (Join-Path $PSScriptRoot 'test-legacy-fixture.ps1') -Work (Join-Path $output 'legacy-source')
 Add-Type -AssemblyName System.Drawing
 foreach ($arch in $Architectures) {
   $stage = Join-Path $output $arch

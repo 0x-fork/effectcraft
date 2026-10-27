@@ -72,10 +72,10 @@ Copy-Item (Join-Path $env:SystemRoot 'System32\cmd.exe') (Join-Path $Bin 'effect
 [IO.File]::WriteAllText((Join-Path $Bin 'NOTICE'), 'Test fixture notice')
 
 # 0.0.1 stands in for releases before this installer change: the same package without the App
-# Paths "Path" value.
+# Paths "Path" value or modern InstallDir/InstallFolder records.
 $Wxs = Join-Path $PSScriptRoot 'effectcraft.wxs'
 $LegacyWxs = Join-Path $Work 'effectcraft-legacy.wxs'
-$pathValue = '(?m)^.*<RegistryValue [^>]*Name="Path"[^>]*/>\r?\n'
+$pathValue = '(?m)^.*<RegistryValue [^>]*Name="(?:Path|InstallDir|InstallFolder)"[^>]*/>\r?\n'
 $text = Get-Content -Raw $Wxs
 if ($text -notmatch $pathValue) { throw "no App Paths Path value in $Wxs to leave out" }
 [IO.File]::WriteAllText($LegacyWxs, ($text -replace $pathValue, ''))
