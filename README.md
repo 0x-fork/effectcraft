@@ -280,6 +280,8 @@ account only, into `%LOCALAPPDATA%\Programs\ArtCraft\EffectCraft`, without an ad
 "Everyone on this computer" installs into `C:\Program Files\ArtCraft\EffectCraft` (`Program Files (x86)` for the 32-bit build). Later versions
 install into the same folder. To install silently
 into a folder of your choice: `msiexec /i effectcraft-<ver>-windows-x64.msi /qn INSTALLFOLDER="D:\Apps\EffectCraft"`.
+A silent install is per-user by default. `INSTALLFOLDER` chooses the folder, not who it is installed for;
+add `ALLUSERS=1`, from an elevated terminal or deployment tool, for an all-users install.
 
 ### macOS
 
