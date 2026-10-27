@@ -277,7 +277,7 @@ send us right now.
 
 Installers and executables are code-signed. The installer asks who to install EffectCraft for and where. By default it installs for your
 account only, into `%LOCALAPPDATA%\Programs\ArtCraft\EffectCraft`, without an administrator prompt;
-"Everyone on this computer" installs into `C:\Program Files\ArtCraft\EffectCraft`. Later versions
+"Everyone on this computer" installs into `C:\Program Files\ArtCraft\EffectCraft` (`Program Files (x86)` for the 32-bit build). Later versions
 install into the same folder. To install silently
 into a folder of your choice: `msiexec /i effectcraft-<ver>-windows-x64.msi /qn INSTALLFOLDER="D:\Apps\EffectCraft"`.
 
