@@ -26,6 +26,36 @@ use effectcraft_time::{FrameRate, Tick};
 
 use crate::Gpu;
 
+mod adjust;
+mod adv3d;
+mod deferred;
+mod deferred_jobs;
+mod fx_color;
+mod fx_depth;
+mod fx_distort;
+mod fx_extra;
+mod fx_gen2;
+mod fx_generate;
+mod fx_key;
+mod fx_light;
+mod fx_lut;
+mod fx_noise;
+mod fx_particles;
+mod fx_pixel2;
+mod fx_sim;
+mod fx_stylize;
+mod fx_text;
+mod fx_time;
+mod fx_tone;
+mod fx_transition;
+mod fx_vr;
+mod fx_warp;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod init;
+mod particles;
+mod three_d;
+mod wgsl_grammar;
+
 /// One GPU test at a time in this process: the calling test thread holds a process-wide lock
 /// until it exits (libtest runs every test on a thread of its own). wgpu's OpenGL backend (Mesa
 /// llvmpipe on FreeBSD, Linux without Vulkan) has one context lock per adapter and panics when a
